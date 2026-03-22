@@ -1,4 +1,5 @@
 import type { GameState, TileMotion } from './engine.js'
+import { drawTile as paintTile, drawEmptyTile } from '../render/tilePainter.js'
 
 const GRID_SIZE_N = 4
 const SLIDE_DUR = 0.15 // seconds
@@ -7,27 +8,6 @@ const POP_DUR = 0.15
 
 const BG_COLOR = '#1a1a2e'
 const GRID_BG_COLOR = '#16213e'
-const EMPTY_TILE_COLOR = '#2d3154'
-
-const TILE_PALETTE: Record<number, { bg: string; fg: string }> = {
-  0: { bg: EMPTY_TILE_COLOR, fg: EMPTY_TILE_COLOR },
-  2: { bg: '#cdc1b4', fg: '#776e65' },
-  4: { bg: '#eee4da', fg: '#776e65' },
-  8: { bg: '#f2b179', fg: '#f9f6f2' },
-  16: { bg: '#f59563', fg: '#f9f6f2' },
-  32: { bg: '#f67c5f', fg: '#f9f6f2' },
-  64: { bg: '#f65e3b', fg: '#f9f6f2' },
-  128: { bg: '#edcf72', fg: '#f9f6f2' },
-  256: { bg: '#edcc61', fg: '#f9f6f2' },
-  512: { bg: '#edc850', fg: '#f9f6f2' },
-  1024: { bg: '#edc53f', fg: '#f9f6f2' },
-  2048: { bg: '#edc22e', fg: '#f9f6f2' },
-}
-const FALLBACK_COLORS = { bg: '#3c4264', fg: '#f9f6f2' }
-
-function getTileColors(value: number): { bg: string; fg: string } {
-  return TILE_PALETTE[value] ?? FALLBACK_COLORS
-}
 
 type Phase =
   | { kind: 'idle' }
@@ -58,11 +38,13 @@ function easeOut(t: number): number {
 export function createRenderer(): Renderer {
   let tiles: AnimTile[] = []
   let nextId = 0
+  let time = 0
   const newId = () => nextId++
 
   function init(state: GameState): void {
     tiles = []
     nextId = 0
+    time = 0
     for (let r = 0; r < GRID_SIZE_N; r++) {
       for (let c = 0; c < GRID_SIZE_N; c++) {
         const val = state.grid[r]?.[c] ?? 0
@@ -120,6 +102,7 @@ export function createRenderer(): Renderer {
   }
 
   function update(dt: number): void {
+    time += dt
     for (const tile of tiles) {
       const p = tile.phase
       if (p.kind === 'slide') {
@@ -151,11 +134,16 @@ export function createRenderer(): Renderer {
     return { row: tile.row, col: tile.col }
   }
 
-  function getScale(tile: AnimTile): number {
+  function getAnimScale(tile: AnimTile): number {
     const p = tile.phase
     if (p.kind === 'appear') return easeOut(p.t)
     if (p.kind === 'pop') return 1 + 0.2 * Math.sin(Math.PI * p.t)
     return 1
+  }
+
+  function getMergeFlash(phase: Phase): number {
+    if (phase.kind === 'pop' && phase.t < 0.3) return (1 - phase.t / 0.3) * 0.7
+    return 0
   }
 
   function getGridLayout(width: number, height: number) {
@@ -179,40 +167,22 @@ export function createRenderer(): Renderer {
     return gridY + gap + row * (tileSize + gap)
   }
 
-  function drawTile(
+  // Renders a tile with pixel art visuals, applying scale transform for animations.
+  function renderAnimTile(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
     size: number,
     value: number,
-    scale: number,
+    animScale: number,
+    mergeFlashAlpha: number,
   ): void {
-    const colors = getTileColors(value)
     const cx = x + size / 2
     const cy = y + size / 2
-    const s = Math.round(size * scale)
+    const s = Math.round(size * animScale)
     const tx = Math.round(cx - s / 2)
     const ty = Math.round(cy - s / 2)
-    ctx.fillStyle = colors.bg
-    ctx.fillRect(tx, ty, s, s)
-    const bw = Math.max(2, Math.round(s * 0.04))
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'
-    ctx.fillRect(tx, ty, s, bw)
-    ctx.fillRect(tx, ty, bw, s)
-    ctx.fillStyle = 'rgba(0,0,0,0.2)'
-    ctx.fillRect(tx, ty + s - bw, s, bw)
-    ctx.fillRect(tx + s - bw, ty, bw, s)
-    if (value === 0) return
-    const label = String(value)
-    const digits = label.length
-    const fontSize = Math.round(digits <= 2 ? s * 0.48 : digits === 3 ? s * 0.38 : s * 0.29)
-    ctx.font = 'bold ' + String(fontSize) + "px 'Courier New', monospace"
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'
-    ctx.fillText(label, Math.round(cx) + 2, Math.round(cy) + 2)
-    ctx.fillStyle = colors.fg
-    ctx.fillText(label, Math.round(cx), Math.round(cy))
+    paintTile(ctx, value, tx, ty, s, time, mergeFlashAlpha)
   }
 
   function drawHeader(ctx: CanvasRenderingContext2D, width: number, score: number): void {
@@ -257,14 +227,15 @@ export function createRenderer(): Renderer {
     const { gridX, gridY, gridSize, gap, tileSize } = getGridLayout(width, height)
     ctx.fillStyle = GRID_BG_COLOR
     ctx.fillRect(gridX, gridY, gridSize, gridSize)
+    // Draw empty tile slots
     for (let r = 0; r < GRID_SIZE_N; r++) {
       for (let c = 0; c < GRID_SIZE_N; c++) {
         const px = toPixelX(c, gridX, gap, tileSize)
         const py = toPixelY(r, gridY, gap, tileSize)
-        ctx.fillStyle = EMPTY_TILE_COLOR
-        ctx.fillRect(px, py, tileSize, tileSize)
+        drawEmptyTile(ctx, px, py, tileSize)
       }
     }
+    // Draw animated tiles, absorbed tiles rendered first (behind survivors)
     const sorted = [...tiles].sort((a, b) => {
       const aZ = a.phase.kind === 'absorbed' ? 0 : 1
       const bZ = b.phase.kind === 'absorbed' ? 0 : 1
@@ -272,10 +243,11 @@ export function createRenderer(): Renderer {
     })
     for (const tile of sorted) {
       const pos = getVisualPos(tile)
-      const scale = getScale(tile)
+      const animScale = getAnimScale(tile)
+      const mergeFlashAlpha = getMergeFlash(tile.phase)
       const px = toPixelX(pos.col, gridX, gap, tileSize)
       const py = toPixelY(pos.row, gridY, gap, tileSize)
-      drawTile(ctx, px, py, tileSize, tile.value, scale)
+      renderAnimTile(ctx, px, py, tileSize, tile.value, animScale, mergeFlashAlpha)
     }
     if (isOver || isWon) {
       ctx.fillStyle = isWon ? 'rgba(237,194,46,0.7)' : 'rgba(20,20,40,0.75)'
