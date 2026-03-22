@@ -142,3 +142,127 @@ export function createInitialState(): GameState {
   const grid = spawnTile(spawnTile(createGrid()))
   return { grid, score: 0, won: false, over: false }
 }
+
+// --- Animation motion types (used by renderer) ---
+
+export interface TileMotion {
+  fromRow: number
+  fromCol: number
+  toRow: number
+  toCol: number
+  value: number // value at destination (merged value if applicable)
+  absorbed: boolean // true if this tile was consumed by a merge
+}
+
+export interface MoveDetail {
+  state: GameState
+  motions: TileMotion[]
+  spawnedAt: [number, number] | null
+}
+
+function posKey(row: number, col: number): string {
+  return String(row) + ',' + String(col)
+}
+
+function computeMotionsForLane(
+  tiles: { val: number; origRow: number; origCol: number }[],
+  toCoords: (idx: number) => [number, number],
+): TileMotion[] {
+  const nonEmpty = tiles.filter((t) => t.val !== 0)
+  const motions: TileMotion[] = []
+  let toIdx = 0
+  let i = 0
+  while (i < nonEmpty.length) {
+    const curr = nonEmpty[i]
+    if (curr === undefined) break
+    const next = nonEmpty[i + 1]
+    if (next !== undefined) {
+      if (curr.val === next.val) {
+        const [toRow, toCol] = toCoords(toIdx)
+        motions.push({ fromRow: curr.origRow, fromCol: curr.origCol, toRow, toCol, value: curr.val * 2, absorbed: false })
+        motions.push({ fromRow: next.origRow, fromCol: next.origCol, toRow, toCol, value: curr.val * 2, absorbed: true })
+        i += 2
+        toIdx++
+        continue
+      }
+    }
+    const [toRow, toCol] = toCoords(toIdx)
+    if (curr.origRow !== toRow || curr.origCol !== toCol) {
+      motions.push({ fromRow: curr.origRow, fromCol: curr.origCol, toRow, toCol, value: curr.val, absorbed: false })
+    }
+    i++
+    toIdx++
+  }
+  return motions
+}
+
+function computeMotions(grid: Grid, direction: Direction): TileMotion[] {
+  const N = GRID_SIZE
+  const motions: TileMotion[] = []
+  if (direction === 'left') {
+    for (let r = 0; r < N; r++) {
+      const row = grid[r] ?? []
+      const tiles = row.map((val, c) => ({ val, origRow: r, origCol: c }))
+      motions.push(...computeMotionsForLane(tiles, (idx) => [r, idx]))
+    }
+  } else if (direction === 'right') {
+    for (let r = 0; r < N; r++) {
+      const row = (grid[r] ?? []).slice().reverse()
+      const tiles = row.map((val, idx) => ({ val, origRow: r, origCol: N - 1 - idx }))
+      motions.push(...computeMotionsForLane(tiles, (idx) => [r, N - 1 - idx]))
+    }
+  } else if (direction === 'up') {
+    for (let c = 0; c < N; c++) {
+      const tiles = Array.from({ length: N }, (_, r) => ({ val: grid[r]?.[c] ?? 0, origRow: r, origCol: c }))
+      motions.push(...computeMotionsForLane(tiles, (idx) => [idx, c]))
+    }
+  } else {
+    // down
+    for (let c = 0; c < N; c++) {
+      const tiles = Array.from({ length: N }, (_, idx) => {
+        const r = N - 1 - idx
+        return { val: grid[r]?.[c] ?? 0, origRow: r, origCol: c }
+      })
+      motions.push(...computeMotionsForLane(tiles, (idx) => [N - 1 - idx, c]))
+    }
+  }
+  return motions
+}
+
+function buildPostSlideGrid(grid: Grid, motions: TileMotion[]): Grid {
+  const N = GRID_SIZE
+  const movedFrom = new Set(motions.map((m) => posKey(m.fromRow, m.fromCol)))
+  const destValues = new Map<string, number>()
+  for (const m of motions) {
+    if (!m.absorbed) destValues.set(posKey(m.toRow, m.toCol), m.value)
+  }
+  return Array.from({ length: N }, (_, r) =>
+    Array.from({ length: N }, (_, c) => {
+      const key = posKey(r, c)
+      if (destValues.has(key)) return destValues.get(key) ?? 0
+      if (movedFrom.has(key)) return 0
+      return grid[r]?.[c] ?? 0
+    }),
+  )
+}
+
+function findSpawnedPos(postSlideGrid: Grid, finalGrid: Grid): [number, number] | null {
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if ((postSlideGrid[r]?.[c] ?? 0) === 0 && (finalGrid[r]?.[c] ?? 0) !== 0) {
+        return [r, c]
+      }
+    }
+  }
+  return null
+}
+
+export function moveDetailed(state: GameState, direction: Direction): MoveDetail {
+  if (state.over) return { state, motions: [], spawnedAt: null }
+  const motions = computeMotions(state.grid, direction)
+  const newState = move(state, direction)
+  if (newState === state) return { state: newState, motions: [], spawnedAt: null }
+  const postSlide = buildPostSlideGrid(state.grid, motions)
+  const spawnedAt = findSpawnedPos(postSlide, newState.grid)
+  return { state: newState, motions, spawnedAt }
+}

@@ -4,6 +4,7 @@ import {
   createInitialState,
   isGameOver,
   move,
+  moveDetailed,
   spawnTile,
   type GameState,
   type Grid,
@@ -382,5 +383,128 @@ describe('점수 누적', () => {
     const next = move(state, 'left')
     // 2+2=4 (4점), 4+4=8 (8점) → 총 12점
     expect(next.score).toBe(12)
+  })
+})
+
+describe('moveDetailed - 모션 추적', () => {
+  it('이동 없을 때 빈 모션을 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 4, 8, 16],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(detail.motions).toHaveLength(0)
+    expect(detail.spawnedAt).toBeNull()
+    expect(detail.state).toBe(state)
+  })
+
+  it('슬라이드 이동 시 올바른 fromCol, toCol을 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [0, 0, 0, 2],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    const motion = detail.motions.find((m) => m.fromRow === 0)
+    expect(motion).toBeDefined()
+    expect(motion?.fromCol).toBe(3)
+    expect(motion?.toCol).toBe(0)
+    expect(motion?.absorbed).toBe(false)
+  })
+
+  it('병합 시 두 개의 모션을 반환한다 (absorbed 포함)', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 2, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    const row0Motions = detail.motions.filter((m) => m.fromRow === 0)
+    expect(row0Motions).toHaveLength(2)
+    const survivor = row0Motions.find((m) => !m.absorbed)
+    const absorbed = row0Motions.find((m) => m.absorbed)
+    expect(survivor?.value).toBe(4)
+    expect(absorbed?.fromCol).toBe(1)
+    expect(absorbed?.toCol).toBe(0)
+  })
+
+  it('score, won, over 값이 move()와 동일하다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 0, 0, 4],
+        [0, 2, 0, 0],
+        [0, 0, 4, 0],
+        [0, 0, 0, 2],
+      ]),
+      score: 10,
+      won: false,
+      over: false,
+    }
+    // 두 호출이 각자 내부적으로 스폰을 수행하므로 그리드는 다를 수 있음
+    // score/won/over 등 결정론적 부분만 비교
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const detail = moveDetailed(state, 'right')
+    const direct = move(state, 'right')
+    vi.restoreAllMocks()
+    expect(detail.state.score).toBe(direct.score)
+    expect(detail.state.won).toBe(direct.won)
+    expect(detail.state.over).toBe(direct.over)
+  })
+
+  it('위쪽 이동 시 올바른 fromRow, toRow를 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [4, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'up')
+    const motion = detail.motions.find((m) => m.fromCol === 0)
+    expect(motion?.fromRow).toBe(3)
+    expect(motion?.toRow).toBe(0)
+  })
+
+  it('스폰 위치를 감지한다', () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0) // 이동 후 빈 셀 중 첫 번째 선택
+      .mockReturnValueOnce(0.5) // value = 2
+    const state: GameState = {
+      grid: makeGrid([
+        [0, 0, 0, 2],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(detail.spawnedAt).not.toBeNull()
+    vi.restoreAllMocks()
   })
 })
