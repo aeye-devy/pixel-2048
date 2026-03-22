@@ -1,7 +1,7 @@
 {
-  "name": "paperclip-t",
+  "name": "fanxy-pixel-2048",
   "version": "0.1.0",
-  "description": "Paperclip — AI agent coordination platform",
+  "description": "Pixel 2048 — A pixel art browser game by Fanxy",
   "type": "module",
   "scripts": {
     "build": "tsc",
