@@ -1,0 +1,144 @@
+export type Grid = number[][]
+export type Direction = 'left' | 'right' | 'up' | 'down'
+
+export interface GameState {
+  grid: Grid
+  score: number
+  won: boolean
+  over: boolean
+}
+
+const GRID_SIZE = 4
+const WIN_VALUE = 2048
+const SPAWN_FOUR_CHANCE = 0.1
+
+export function createGrid(): Grid {
+  return Array.from({ length: GRID_SIZE }, (): number[] =>
+    Array.from({ length: GRID_SIZE }, () => 0),
+  )
+}
+
+function emptyPositions(grid: Grid): [number, number][] {
+  const positions: [number, number][] = []
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if ((grid[r]?.[c] ?? -1) === 0) positions.push([r, c])
+    }
+  }
+  return positions
+}
+
+export function spawnTile(grid: Grid): Grid {
+  const positions = emptyPositions(grid)
+  if (positions.length === 0) return grid
+  const idx = Math.floor(Math.random() * positions.length)
+  const pos = positions[idx]
+  if (!pos) return grid
+  const [r, c] = pos
+  const value = Math.random() < SPAWN_FOUR_CHANCE ? 4 : 2
+  const next = grid.map((row) => [...row])
+  const row = next[r]
+  if (row) row[c] = value
+  return next
+}
+
+function slideRowLeft(row: number[]): { row: number[]; delta: number } {
+  const tiles = row.filter((v) => v !== 0)
+  const result: number[] = []
+  let delta = 0
+  let i = 0
+  while (i < tiles.length) {
+    const curr = tiles[i] ?? 0
+    const next = tiles[i + 1]
+    if (next !== undefined && curr === next) {
+      const merged = curr * 2
+      result.push(merged)
+      delta += merged
+      i += 2
+    } else {
+      result.push(curr)
+      i++
+    }
+  }
+  while (result.length < GRID_SIZE) result.push(0)
+  return { row: result, delta }
+}
+
+function transpose(grid: Grid): Grid {
+  return Array.from({ length: GRID_SIZE }, (_, c): number[] =>
+    Array.from({ length: GRID_SIZE }, (_, r) => grid[r]?.[c] ?? 0),
+  )
+}
+
+function flipRows(grid: Grid): Grid {
+  return grid.map((row) => [...row].reverse())
+}
+
+function applyLeft(grid: Grid): { grid: Grid; delta: number } {
+  let delta = 0
+  const next = grid.map((row) => {
+    const result = slideRowLeft(row)
+    delta += result.delta
+    return result.row
+  })
+  return { grid: next, delta }
+}
+
+function gridEqual(a: Grid, b: Grid): boolean {
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if ((a[r]?.[c] ?? 0) !== (b[r]?.[c] ?? 0)) return false
+    }
+  }
+  return true
+}
+
+function hasWon(grid: Grid): boolean {
+  return grid.some((row) => row.some((v) => v >= WIN_VALUE))
+}
+
+export function isGameOver(grid: Grid): boolean {
+  if (emptyPositions(grid).length > 0) return false
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const v = grid[r]?.[c] ?? 0
+      if (c + 1 < GRID_SIZE && (grid[r]?.[c + 1] ?? -1) === v) return false
+      if (r + 1 < GRID_SIZE && (grid[r + 1]?.[c] ?? -1) === v) return false
+    }
+  }
+  return true
+}
+
+export function move(state: GameState, direction: Direction): GameState {
+  if (state.over) return state
+  let workGrid = state.grid.map((row) => [...row])
+  let delta = 0
+  if (direction === 'left') {
+    const result = applyLeft(workGrid)
+    workGrid = result.grid
+    delta = result.delta
+  } else if (direction === 'right') {
+    const result = applyLeft(flipRows(workGrid))
+    workGrid = flipRows(result.grid)
+    delta = result.delta
+  } else if (direction === 'up') {
+    const result = applyLeft(transpose(workGrid))
+    workGrid = transpose(result.grid)
+    delta = result.delta
+  } else {
+    const result = applyLeft(flipRows(transpose(workGrid)))
+    workGrid = transpose(flipRows(result.grid))
+    delta = result.delta
+  }
+  if (gridEqual(workGrid, state.grid)) return state
+  const newScore = state.score + delta
+  const won = state.won || hasWon(workGrid)
+  const spawned = spawnTile(workGrid)
+  const over = isGameOver(spawned)
+  return { grid: spawned, score: newScore, won, over }
+}
+
+export function createInitialState(): GameState {
+  const grid = spawnTile(spawnTile(createGrid()))
+  return { grid, score: 0, won: false, over: false }
+}
