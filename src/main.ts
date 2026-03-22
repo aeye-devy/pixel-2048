@@ -1,11 +1,15 @@
 import { createGameLoop } from './game/loop.js'
-import { createInitialState, moveDetailed } from './game/engine.js'
-import type { Direction } from './game/engine.js'
+import { createInitialState, moveDetailed, continueAfterGameOver } from './game/engine.js'
+import type { Direction, GameState } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
+import { createMockAdProvider } from './ads/adProvider.js'
+import { fireAdEvent } from './ads/analytics.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
 const BEST_SCORE_KEY = 'pixel2048-best'
+const MAX_UNDOS_PER_GAME = 1
+const MAX_CONTINUES_PER_GAME = 1
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')
@@ -30,15 +34,21 @@ resize()
 let gameState = createInitialState()
 let bestScore = loadBestScore()
 let continueMode = false
+let previousState: GameState | null = null
+let undosUsed = 0
+let continuesUsed = 0
+let adPlaying = false
 const renderer = createRenderer()
+const adProvider = createMockAdProvider()
 renderer.init(gameState)
 
 let inputLocked = false
 
 function handleDirection(dir: Direction): void {
-  if (inputLocked || gameState.over) return
+  if (inputLocked || gameState.over || adPlaying) return
   const detail = moveDetailed(gameState, dir)
   if (detail.state === gameState) return
+  previousState = gameState
   gameState = detail.state
   if (gameState.score > bestScore) {
     bestScore = gameState.score
@@ -54,6 +64,10 @@ function handleDirection(dir: Direction): void {
 function newGame(): void {
   gameState = createInitialState()
   continueMode = false
+  previousState = null
+  undosUsed = 0
+  continuesUsed = 0
+  adPlaying = false
   renderer.init(gameState)
 }
 
@@ -61,7 +75,45 @@ function continueGame(): void {
   continueMode = true
 }
 
+async function handleWatchAdUndo(): Promise<void> {
+  if (undosUsed >= MAX_UNDOS_PER_GAME || previousState === null || adPlaying) return
+  fireAdEvent('ad_prompt_shown', { placement: 'undo' })
+  adPlaying = true
+  const result = await adProvider.showRewardedAd()
+  adPlaying = false
+  if (result === 'rewarded') {
+    fireAdEvent('ad_watched', { placement: 'undo' })
+    gameState = previousState
+    previousState = null
+    undosUsed++
+    renderer.init(gameState)
+  } else if (result === 'skipped') {
+    fireAdEvent('ad_skipped', { placement: 'undo' })
+  } else {
+    fireAdEvent('ad_failed', { placement: 'undo' })
+  }
+}
+
+async function handleWatchAdContinue(): Promise<void> {
+  if (continuesUsed >= MAX_CONTINUES_PER_GAME || !gameState.over || adPlaying) return
+  fireAdEvent('ad_prompt_shown', { placement: 'continue' })
+  adPlaying = true
+  const result = await adProvider.showRewardedAd()
+  adPlaying = false
+  if (result === 'rewarded') {
+    fireAdEvent('ad_watched', { placement: 'continue' })
+    gameState = continueAfterGameOver(gameState)
+    continuesUsed++
+    renderer.init(gameState)
+  } else if (result === 'skipped') {
+    fireAdEvent('ad_skipped', { placement: 'continue' })
+  } else {
+    fireAdEvent('ad_failed', { placement: 'continue' })
+  }
+}
+
 function handleCanvasTap(clientX: number, clientY: number): void {
+  if (adPlaying) return
   const rect = canvas.getBoundingClientRect()
   const scaleX = canvas.width / rect.width
   const scaleY = canvas.height / rect.height
@@ -70,6 +122,8 @@ function handleCanvasTap(clientX: number, clientY: number): void {
   const action = renderer.getButtonAt(px, py)
   if (action === 'new-game') newGame()
   else if (action === 'continue') continueGame()
+  else if (action === 'undo') void handleWatchAdUndo()
+  else if (action === 'watch-ad-continue') void handleWatchAdContinue()
 }
 
 const KEY_MAP: Record<string, Direction> = {
@@ -143,16 +197,16 @@ const loop = createGameLoop(
     renderer.update(dt)
   },
   (renderCtx) => {
-    const showWin = gameState.won && !continueMode
-    renderer.render(
-      renderCtx,
-      canvas.width,
-      canvas.height,
-      gameState.score,
+    const undoAvailable = previousState !== null && undosUsed < MAX_UNDOS_PER_GAME
+    renderer.render(renderCtx, canvas.width, canvas.height, {
+      score: gameState.score,
       bestScore,
-      gameState.over,
-      showWin,
-    )
+      isOver: gameState.over,
+      isWon: gameState.won && !continueMode,
+      undoAvailable,
+      continueWithAdAvailable: gameState.over && continuesUsed < MAX_CONTINUES_PER_GAME,
+      isAdPlaying: adPlaying,
+    })
   },
 )
 

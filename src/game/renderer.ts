@@ -12,6 +12,7 @@ const GRID_BG_COLOR = '#16213e'
 const HEADER_BG = '#0d1b2a'
 const SCORE_BOX_BG = '#2d3154'
 const BTN_BG = '#3a3f6b'
+const AD_BTN_BG = '#5a4a10' // gold-tinted for ad-powered buttons
 
 type Phase =
   | { kind: 'idle' }
@@ -33,24 +34,26 @@ interface HitArea {
   y: number
   w: number
   h: number
-  action: 'new-game' | 'continue'
+  action: ButtonAction
 }
 
-export type ButtonAction = 'new-game' | 'continue'
+export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue'
+
+export interface RenderOptions {
+  score: number
+  bestScore: number
+  isOver: boolean
+  isWon: boolean
+  undoAvailable: boolean
+  continueWithAdAvailable: boolean
+  isAdPlaying: boolean
+}
 
 export interface Renderer {
   init(state: GameState): void
   applyMove(motions: TileMotion[], spawnedAt: [number, number] | null, newState: GameState): void
   update(dt: number): void
-  render(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    score: number,
-    bestScore: number,
-    isOver: boolean,
-    isWon: boolean,
-  ): void
+  render(ctx: CanvasRenderingContext2D, width: number, height: number, opts: RenderOptions): void
   getButtonAt(px: number, py: number): ButtonAction | null
 }
 
@@ -216,10 +219,11 @@ export function createRenderer(): Renderer {
     h: number,
     label: string,
     fontSize: number,
+    bgColor = BTN_BG,
   ): void {
     const rx = Math.round(x)
     const ry = Math.round(y)
-    ctx.fillStyle = BTN_BG
+    ctx.fillStyle = bgColor
     ctx.fillRect(rx, ry, w, h)
     ctx.fillStyle = 'rgba(255,255,255,0.35)'
     ctx.fillRect(rx, ry, w, 2)
@@ -295,6 +299,7 @@ export function createRenderer(): Renderer {
     gridSize: number,
     score: number,
     isOver: boolean,
+    continueWithAdAvailable: boolean,
   ): void {
     const cx = Math.round(gridX + gridSize / 2)
     ctx.fillStyle = isOver ? 'rgba(20,20,40,0.82)' : 'rgba(237,194,46,0.82)'
@@ -313,6 +318,7 @@ export function createRenderer(): Renderer {
     const btnFontSize = Math.round(Math.max(10, gridSize * 0.055))
     const btnY = Math.round(gridY + gridSize * 0.64)
     if (!isOver) {
+      // Win overlay: CONTINUE (no ad) + NEW GAME
       const spacing = Math.round(gridSize * 0.04)
       const startX = cx - Math.round((btnW * 2 + spacing) / 2)
       drawPixelButton(ctx, startX, btnY, btnW, btnH, 'CONTINUE', btnFontSize)
@@ -320,22 +326,75 @@ export function createRenderer(): Renderer {
       const ngX = startX + btnW + spacing
       drawPixelButton(ctx, ngX, btnY, btnW, btnH, 'NEW GAME', btnFontSize)
       hitAreas.push({ x: ngX, y: btnY, w: btnW, h: btnH, action: 'new-game' })
+    } else if (continueWithAdAvailable) {
+      // Game over with ad-continue available: WATCH AD (gold) + NEW GAME
+      const spacing = Math.round(gridSize * 0.04)
+      const startX = cx - Math.round((btnW * 2 + spacing) / 2)
+      drawPixelButton(ctx, startX, btnY, btnW, btnH, '▶ CONTINUE', btnFontSize, AD_BTN_BG)
+      hitAreas.push({ x: startX, y: btnY, w: btnW, h: btnH, action: 'watch-ad-continue' })
+      const ngX = startX + btnW + spacing
+      drawPixelButton(ctx, ngX, btnY, btnW, btnH, 'NEW GAME', btnFontSize)
+      hitAreas.push({ x: ngX, y: btnY, w: btnW, h: btnH, action: 'new-game' })
     } else {
+      // Game over, no continues left: just NEW GAME
       const btnX = cx - Math.round(btnW / 2)
       drawPixelButton(ctx, btnX, btnY, btnW, btnH, 'NEW GAME', btnFontSize)
       hitAreas.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'new-game' })
     }
   }
 
+  function drawUndoButton(
+    ctx: CanvasRenderingContext2D,
+    gridX: number,
+    gridY: number,
+    gridSize: number,
+  ): void {
+    const btnW = Math.min(130, Math.round(gridSize * 0.38))
+    const btnH = Math.round(Math.max(34, gridSize * 0.09))
+    const btnX = gridX + Math.round((gridSize - btnW) / 2)
+    const btnY = gridY + gridSize + 14
+    const btnFontSize = Math.round(Math.max(10, gridSize * 0.05))
+    drawPixelButton(ctx, btnX, btnY, btnW, btnH, '▶ UNDO', btnFontSize, AD_BTN_BG)
+    hitAreas.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'undo' })
+  }
+
+  function drawAdOverlay(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'
+    ctx.fillRect(0, 0, width, height)
+    const boxW = Math.min(300, width - 40)
+    const boxH = 110
+    const bx = Math.round((width - boxW) / 2)
+    const by = Math.round((height - boxH) / 2)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(bx, by, boxW, boxH)
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'
+    ctx.fillRect(bx, by, boxW, 2)
+    ctx.fillRect(bx, by, 2, boxH)
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.fillRect(bx, by + boxH - 2, boxW, 2)
+    ctx.fillRect(bx + boxW - 2, by, 2, boxH)
+    ctx.fillStyle = '#f9f6f2'
+    ctx.font = 'bold 17px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('Ad Playing...', Math.round(bx + boxW / 2), Math.round(by + boxH / 2 - 14))
+    ctx.font = '12px "Courier New", monospace'
+    ctx.fillStyle = '#bbada0'
+    ctx.fillText('Please wait a moment', Math.round(bx + boxW / 2), Math.round(by + boxH / 2 + 16))
+  }
+
   function render(
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    score: number,
-    bestScore: number,
-    isOver: boolean,
-    isWon: boolean,
+    opts: RenderOptions,
   ): void {
+    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying } =
+      opts
     hitAreas = []
     ctx.imageSmoothingEnabled = false
     ctx.fillStyle = BG_COLOR
@@ -366,8 +425,14 @@ export function createRenderer(): Renderer {
       const py = toPixelY(pos.row, gridY, gap, tileSize)
       renderAnimTile(ctx, px, py, tileSize, tile.value, animScale, mergeFlashAlpha)
     }
+    if (undoAvailable && !isOver && !isWon) {
+      drawUndoButton(ctx, gridX, gridY, gridSize)
+    }
     if (isOver || isWon) {
-      drawOverlay(ctx, gridX, gridY, gridSize, score, isOver)
+      drawOverlay(ctx, gridX, gridY, gridSize, score, isOver, continueWithAdAvailable)
+    }
+    if (isAdPlaying) {
+      drawAdOverlay(ctx, width, height)
     }
   }
 

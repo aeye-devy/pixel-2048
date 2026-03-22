@@ -143,6 +143,38 @@ export function createInitialState(): GameState {
   return { grid, score: 0, won: false, over: false }
 }
 
+// Removes 2 random tiles and spawns 1 new one, resetting the game-over state.
+// Used as the reward for watching an ad after game over.
+export function continueAfterGameOver(state: GameState): GameState {
+  if (!state.over) return state
+  let grid = state.grid.map((row) => [...row])
+  const occupied: [number, number][] = []
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if ((grid[r]?.[c] ?? 0) !== 0) occupied.push([r, c])
+    }
+  }
+  // Fisher-Yates shuffle to pick 2 random tiles to remove
+  for (let i = occupied.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const a = occupied[i]
+    const b = occupied[j]
+    if (a && b) {
+      occupied[i] = b
+      occupied[j] = a
+    }
+  }
+  for (let i = 0; i < Math.min(2, occupied.length); i++) {
+    const pos = occupied[i]
+    if (!pos) continue
+    const [r, c] = pos
+    const row = grid[r]
+    if (row) row[c] = 0
+  }
+  const newGrid = spawnTile(grid)
+  return { grid: newGrid, score: state.score, won: state.won, over: false }
+}
+
 // --- Animation motion types (used by renderer) ---
 
 export interface TileMotion {
