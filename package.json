@@ -4,7 +4,8 @@
   "description": "Pixel 2048 — A pixel art browser game by Fanxy",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "dev": "vite",
+    "build": "vite build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -26,6 +27,8 @@
     "eslint-config-prettier": "^10.0.0",
     "prettier": "^3.0.0",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^7.3.1",
     "vitest": "^3.0.0"
   }
 }
