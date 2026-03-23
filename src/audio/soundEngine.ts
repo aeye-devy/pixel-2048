@@ -1,3 +1,5 @@
+import { createBgmEngine } from './bgmEngine.js'
+
 const MUTE_KEY = 'pixel2048-muted'
 
 type SoundName = 'slide' | 'merge' | 'spawn' | 'gameOver' | 'win' | 'buttonTap'
@@ -11,27 +13,50 @@ export interface SoundEngine {
   toggleMute(): boolean
   /** Current mute state. */
   isMuted(): boolean
+  /** Request BGM playback (starts after AudioContext is unlocked). */
+  startBgm(): void
+  /** Stop BGM. */
+  stopBgm(): void
+  /** Set BGM tension level 0–1 (board fill → tempo/intensity). */
+  setBgmTension(level: number): void
 }
 
 export function createSoundEngine(): SoundEngine {
   let ctx: AudioContext | null = null
   let muted = localStorage.getItem(MUTE_KEY) === '1'
+  const bgm = createBgmEngine()
+  let bgmWanted = false
 
   function getCtx(): AudioContext {
     ctx ??= new AudioContext()
     return ctx
   }
 
+  function tryStartBgm(): void {
+    if (!bgmWanted || muted) return
+    const ac = getCtx()
+    if (ac.state === 'running' && !bgm.isPlaying()) {
+      bgm.start(ac, ac.destination)
+    }
+  }
+
   function unlock(): void {
     const ac = getCtx()
     if (ac.state === 'suspended') {
-      void ac.resume()
+      void ac.resume().then(() => { tryStartBgm() })
+    } else {
+      tryStartBgm()
     }
   }
 
   function toggleMute(): boolean {
     muted = !muted
     localStorage.setItem(MUTE_KEY, muted ? '1' : '0')
+    if (muted) {
+      bgm.stop()
+    } else {
+      tryStartBgm()
+    }
     return muted
   }
 
@@ -173,5 +198,19 @@ export function createSoundEngine(): SoundEngine {
     }
   }
 
-  return { unlock, play, toggleMute, isMuted }
+  function startBgm(): void {
+    bgmWanted = true
+    tryStartBgm()
+  }
+
+  function stopBgm(): void {
+    bgmWanted = false
+    bgm.stop()
+  }
+
+  function setBgmTension(level: number): void {
+    bgm.setTension(level)
+  }
+
+  return { unlock, play, toggleMute, isMuted, startBgm, stopBgm, setBgmTension }
 }
