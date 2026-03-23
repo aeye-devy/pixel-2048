@@ -16,7 +16,7 @@ let sessionReported = false
 
 function isDntEnabled(): boolean {
   if (typeof navigator === 'undefined') return false
-  return navigator.doNotTrack === '1' || (navigator as Record<string, unknown>).globalPrivacyControl === true
+  return navigator.doNotTrack === '1' || (navigator as unknown as Record<string, unknown>).globalPrivacyControl === true
 }
 
 function send(event: GameEvent, data?: EventPayload): void {
