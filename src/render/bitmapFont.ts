@@ -12,6 +12,7 @@ const DIGIT_BITMAPS: Readonly<Record<string, readonly number[]>> = {
   '7': [0b111, 0b001, 0b010, 0b010, 0b010],
   '8': [0b111, 0b101, 0b111, 0b101, 0b111],
   '9': [0b011, 0b101, 0b011, 0b001, 0b010],
+  '+': [0b000, 0b010, 0b111, 0b010, 0b000],
 } as const
 
 const CHAR_W = 3

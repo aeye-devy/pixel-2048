@@ -1,10 +1,13 @@
 import type { GameState, TileMotion } from './engine.js'
 import { drawTile as paintTile, drawEmptyTile } from '../render/tilePainter.js'
+import { TILE_STYLES, FALLBACK_STYLE } from '../render/tileStyle.js'
+import { drawText } from '../render/bitmapFont.js'
 
 const GRID_SIZE_N = 4
 const SLIDE_DUR = 0.15 // seconds
 const APPEAR_DUR = 0.1
 const POP_DUR = 0.15
+const SCORE_DELTA_DUR = 0.5
 const HEADER_H = 90
 
 const BG_COLOR = '#1a1a2e'
@@ -27,6 +30,14 @@ interface AnimTile {
   row: number
   col: number
   phase: Phase
+}
+
+interface ScoreDelta {
+  value: number
+  row: number
+  col: number
+  t: number
+  tileValue: number
 }
 
 interface HitArea {
@@ -67,12 +78,14 @@ export function createRenderer(): Renderer {
   let nextId = 0
   let time = 0
   let hitAreas: HitArea[] = []
+  let scoreDeltaList: ScoreDelta[] = []
   const newId = () => nextId++
 
   function init(state: GameState): void {
     tiles = []
     nextId = 0
     time = 0
+    scoreDeltaList = []
     for (let r = 0; r < GRID_SIZE_N; r++) {
       for (let c = 0; c < GRID_SIZE_N; c++) {
         const val = state.grid[r]?.[c] ?? 0
@@ -104,6 +117,9 @@ export function createRenderer(): Renderer {
       } else {
         const moved = motion.fromRow !== motion.toRow || motion.fromCol !== motion.toCol
         const merged = motion.value !== tile.value
+        if (merged) {
+          scoreDeltaList.push({ value: motion.value, row: motion.toRow, col: motion.toCol, t: 0, tileValue: motion.value })
+        }
         if (moved) {
           next.push({
             ...tile,
@@ -147,6 +163,10 @@ export function createRenderer(): Renderer {
       }
     }
     tiles = tiles.filter((t) => !(t.phase.kind === 'absorbed' && t.phase.t >= 1))
+    for (const sd of scoreDeltaList) {
+      sd.t = Math.min(sd.t + dt / SCORE_DELTA_DUR, 1)
+    }
+    scoreDeltaList = scoreDeltaList.filter((sd) => sd.t < 1)
   }
 
   function getVisualPos(tile: AnimTile): { row: number; col: number } {
@@ -430,6 +450,33 @@ export function createRenderer(): Renderer {
     ctx.fillText('Please wait a moment', Math.round(bx + boxW / 2), Math.round(by + boxH / 2 + 16))
   }
 
+  function renderScoreDeltas(
+    ctx: CanvasRenderingContext2D,
+    gridX: number,
+    gridY: number,
+    gap: number,
+    tileSize: number,
+  ): void {
+    const floatDist = Math.round(tileSize * 0.4)
+    const scale = tileSize / 16
+    const pixSize = Math.max(1, Math.round(scale))
+    for (const sd of scoreDeltaList) {
+      const progress = easeOut(sd.t)
+      const alpha = 1 - progress
+      if (alpha <= 0) continue
+      const cx = toPixelX(sd.col, gridX, gap, tileSize) + tileSize / 2
+      const cy = toPixelY(sd.row, gridY, gap, tileSize) + tileSize / 2 - floatDist * progress
+      const text = '+' + String(sd.value)
+      const style = TILE_STYLES[sd.tileValue] ?? FALLBACK_STYLE
+      const glowColor = style.glowColor ?? style.bg
+      ctx.globalAlpha = alpha * 0.7
+      drawText(ctx, text, cx, cy + pixSize, glowColor, pixSize)
+      ctx.globalAlpha = alpha
+      drawText(ctx, text, cx, cy, '#ffffff', pixSize)
+      ctx.globalAlpha = 1
+    }
+  }
+
   function render(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -468,6 +515,7 @@ export function createRenderer(): Renderer {
       const py = toPixelY(pos.row, gridY, gap, tileSize)
       renderAnimTile(ctx, px, py, tileSize, tile.value, animScale, mergeFlashAlpha)
     }
+    renderScoreDeltas(ctx, gridX, gridY, gap, tileSize)
     if (undoAvailable && !isOver && !isWon) {
       drawUndoButton(ctx, gridX, gridY, gridSize)
     }
