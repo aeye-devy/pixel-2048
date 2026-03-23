@@ -2,7 +2,7 @@ import { createBgmEngine } from './bgmEngine.js'
 
 const MUTE_KEY = 'pixel2048-muted'
 
-type SoundName = 'slide' | 'merge' | 'spawn' | 'gameOver' | 'win' | 'buttonTap'
+type SoundName = 'slide' | 'merge' | 'spawn' | 'gameOver' | 'win' | 'buttonTap' | 'combo'
 
 export interface SoundEngine {
   /** Resume AudioContext (call on first user gesture for mobile). */
@@ -165,6 +165,18 @@ export function createSoundEngine(): SoundEngine {
     osc(ac, 'triangle', 1568, t + 0.35, 0.15, 0.04, 2093)
   }
 
+  function playCombo(ac: AudioContext, comboCount: number): void {
+    const t = ac.currentTime
+    // Ascending arpeggio — higher pitch for bigger combos
+    const baseFreq = 523 + (comboCount - 2) * 80 // C5 base, scales up
+    osc(ac, 'square', baseFreq, t, 0.08, 0.1)
+    osc(ac, 'square', baseFreq * 1.25, t + 0.06, 0.08, 0.1) // major 3rd
+    osc(ac, 'square', baseFreq * 1.5, t + 0.12, 0.12, 0.12) // perfect 5th (hold)
+    // Sparkle layer
+    osc(ac, 'triangle', baseFreq * 2, t + 0.15, 0.1, 0.05)
+    noise(ac, t, 0.03, 0.02)
+  }
+
   function playButtonTap(ac: AudioContext): void {
     const t = ac.currentTime
     // Quick UI click: short square pulse
@@ -194,6 +206,9 @@ export function createSoundEngine(): SoundEngine {
         break
       case 'buttonTap':
         playButtonTap(ac)
+        break
+      case 'combo':
+        playCombo(ac, mergeValue ?? 2)
         break
     }
   }

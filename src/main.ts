@@ -1,11 +1,11 @@
 import { createGameLoop } from './game/loop.js'
-import { createInitialState, moveDetailed, continueAfterGameOver } from './game/engine.js'
+import { createInitialState, moveDetailed, continueAfterGameOver, countMerges } from './game/engine.js'
 import type { Direction, GameState, Grid } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
 import { createMockAdProvider } from './ads/adProvider.js'
 import { fireAdEvent, trackEvent, trackPageView } from './ads/analytics.js'
 import { createSoundEngine } from './audio/soundEngine.js'
-import { loadStats, saveStats, recordGameEnd } from './game/stats.js'
+import { loadStats, saveStats, recordGameEnd, updateBestCombo } from './game/stats.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
@@ -75,12 +75,19 @@ function handleDirection(dir: Direction): void {
   }
   renderer.applyMove(detail.motions, detail.spawnedAt, detail.state)
   // Audio: find highest merge value from motions
+  const mergeCount = countMerges(detail.motions)
   const mergeMotion = detail.motions.find((m) => !m.absorbed && m.value > 0 &&
     detail.motions.some((a) => a.absorbed && a.toRow === m.toRow && a.toCol === m.toCol))
-  if (mergeMotion) {
+  if (mergeCount >= 2) {
+    sound.play('combo', mergeCount)
+  } else if (mergeMotion) {
     sound.play('merge', mergeMotion.value)
   } else if (detail.motions.length > 0) {
     sound.play('slide')
+  }
+  if (mergeCount >= 2) {
+    gameStats = updateBestCombo(gameStats, mergeCount)
+    saveStats(gameStats)
   }
   if (detail.spawnedAt !== null) {
     setTimeout(() => { sound.play('spawn') }, 100)

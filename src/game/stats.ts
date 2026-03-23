@@ -7,6 +7,7 @@ export interface GameStats {
   wins: number
   currentStreak: number
   bestStreak: number
+  bestCombo: number
 }
 
 const DEFAULT_STATS: GameStats = {
@@ -16,6 +17,7 @@ const DEFAULT_STATS: GameStats = {
   wins: 0,
   currentStreak: 0,
   bestStreak: 0,
+  bestCombo: 0,
 }
 
 export function loadStats(): GameStats {
@@ -32,6 +34,7 @@ export function loadStats(): GameStats {
       wins: typeof obj['wins'] === 'number' ? obj['wins'] : 0,
       currentStreak: typeof obj['currentStreak'] === 'number' ? obj['currentStreak'] : 0,
       bestStreak: typeof obj['bestStreak'] === 'number' ? obj['bestStreak'] : 0,
+      bestCombo: typeof obj['bestCombo'] === 'number' ? obj['bestCombo'] : 0,
     }
   } catch {
     return { ...DEFAULT_STATS }
@@ -54,6 +57,11 @@ function getHighestTile(grid: number[][]): number {
 
 const STREAK_THRESHOLD = 512
 
+export function updateBestCombo(stats: GameStats, combo: number): GameStats {
+  if (combo <= stats.bestCombo) return stats
+  return { ...stats, bestCombo: combo }
+}
+
 export function recordGameEnd(
   stats: GameStats,
   grid: number[][],
@@ -71,6 +79,7 @@ export function recordGameEnd(
     wins: stats.wins + (won ? 1 : 0),
     currentStreak,
     bestStreak,
+    bestCombo: stats.bestCombo,
   }
 }
 

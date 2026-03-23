@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { loadStats, saveStats, recordGameEnd, getWinRate } from './stats.js'
+import { loadStats, saveStats, recordGameEnd, getWinRate, updateBestCombo } from './stats.js'
 import type { GameStats } from './stats.js'
 
 const mockStorage = new Map<string, string>()
@@ -27,6 +27,7 @@ describe('loadStats', () => {
       wins: 0,
       currentStreak: 0,
       bestStreak: 0,
+      bestCombo: 0,
     })
   })
   it('저장된 데이터가 있을 때 파싱하여 반환한다', () => {
@@ -37,6 +38,7 @@ describe('loadStats', () => {
       wins: 1,
       currentStreak: 3,
       bestStreak: 4,
+      bestCombo: 3,
     }
     mockStorage.set('pixel2048-stats', JSON.stringify(saved))
     const stats = loadStats()
@@ -65,6 +67,7 @@ describe('saveStats', () => {
       wins: 0,
       currentStreak: 1,
       bestStreak: 1,
+      bestCombo: 2,
     }
     saveStats(stats)
     const raw = mockStorage.get('pixel2048-stats')
@@ -81,6 +84,7 @@ describe('recordGameEnd', () => {
     wins: 0,
     currentStreak: 0,
     bestStreak: 0,
+    bestCombo: 0,
   }
   const grid512 = [
     [512, 64, 32, 16],
@@ -142,9 +146,37 @@ describe('recordGameEnd', () => {
 
 describe('getWinRate', () => {
   it('게임이 0회일 때 0을 반환한다', () => {
-    expect(getWinRate({ gamesPlayed: 0, highestTile: 0, totalScore: 0, wins: 0, currentStreak: 0, bestStreak: 0 })).toBe(0)
+    expect(getWinRate({ gamesPlayed: 0, highestTile: 0, totalScore: 0, wins: 0, currentStreak: 0, bestStreak: 0, bestCombo: 0 })).toBe(0)
   })
   it('10게임 중 3승일 때 30을 반환한다', () => {
-    expect(getWinRate({ gamesPlayed: 10, highestTile: 2048, totalScore: 50000, wins: 3, currentStreak: 0, bestStreak: 2 })).toBe(30)
+    expect(getWinRate({ gamesPlayed: 10, highestTile: 2048, totalScore: 50000, wins: 3, currentStreak: 0, bestStreak: 2, bestCombo: 0 })).toBe(30)
+  })
+})
+
+describe('updateBestCombo', () => {
+  const base: GameStats = {
+    gamesPlayed: 5,
+    highestTile: 512,
+    totalScore: 10000,
+    wins: 1,
+    currentStreak: 2,
+    bestStreak: 3,
+    bestCombo: 2,
+  }
+  it('기존 최고 콤보보다 높은 콤보일 때 갱신한다', () => {
+    const result = updateBestCombo(base, 4)
+    expect(result.bestCombo).toBe(4)
+  })
+  it('기존 최고 콤보보다 낮거나 같으면 동일 객체를 반환한다', () => {
+    const same = updateBestCombo(base, 2)
+    expect(same).toBe(base)
+    const lower = updateBestCombo(base, 1)
+    expect(lower).toBe(base)
+  })
+  it('다른 stats 필드를 변경하지 않는다', () => {
+    const result = updateBestCombo(base, 5)
+    expect(result.gamesPlayed).toBe(base.gamesPlayed)
+    expect(result.highestTile).toBe(base.highestTile)
+    expect(result.totalScore).toBe(base.totalScore)
   })
 })

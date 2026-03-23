@@ -9,6 +9,7 @@ const SLIDE_DUR = 0.15 // seconds
 const APPEAR_DUR = 0.1
 const POP_DUR = 0.15
 const SCORE_DELTA_DUR = 0.5
+const COMBO_DUR = 0.8
 const HEADER_H = 90
 
 const BG_COLOR = '#1a1a2e'
@@ -39,6 +40,11 @@ interface ScoreDelta {
   col: number
   t: number
   tileValue: number
+}
+
+interface ComboAnim {
+  count: number
+  t: number
 }
 
 interface HitArea {
@@ -82,6 +88,7 @@ export function createRenderer(): Renderer {
   let time = 0
   let hitAreas: HitArea[] = []
   let scoreDeltaList: ScoreDelta[] = []
+  let comboAnim: ComboAnim | null = null
   const newId = () => nextId++
 
   function init(state: GameState): void {
@@ -89,6 +96,7 @@ export function createRenderer(): Renderer {
     nextId = 0
     time = 0
     scoreDeltaList = []
+    comboAnim = null
     for (let r = 0; r < GRID_SIZE_N; r++) {
       for (let c = 0; c < GRID_SIZE_N; c++) {
         const val = state.grid[r]?.[c] ?? 0
@@ -146,6 +154,10 @@ export function createRenderer(): Renderer {
       next.push({ id: newId(), value: val, row: r, col: c, phase: { kind: 'appear', t: 0 } })
     }
     tiles = next
+    const mergeCount = motions.filter((m) => m.absorbed).length
+    if (mergeCount >= 2) {
+      comboAnim = { count: mergeCount, t: 0 }
+    }
   }
 
   function update(dt: number): void {
@@ -170,6 +182,10 @@ export function createRenderer(): Renderer {
       sd.t = Math.min(sd.t + dt / SCORE_DELTA_DUR, 1)
     }
     scoreDeltaList = scoreDeltaList.filter((sd) => sd.t < 1)
+    if (comboAnim !== null) {
+      comboAnim.t = Math.min(comboAnim.t + dt / COMBO_DUR, 1)
+      if (comboAnim.t >= 1) comboAnim = null
+    }
   }
 
   function getVisualPos(tile: AnimTile): { row: number; col: number } {
@@ -467,7 +483,7 @@ export function createRenderer(): Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.88)'
     ctx.fillRect(0, 0, width, height)
     const boxW = Math.min(320, width - 40)
-    const boxH = 310
+    const boxH = 338
     const bx = Math.round((width - boxW) / 2)
     const by = Math.round((height - boxH) / 2)
     // Box background with pixel border
@@ -496,6 +512,7 @@ export function createRenderer(): Renderer {
       ['Win Rate', winRate + '%'],
       ['Current Streak', String(stats.currentStreak)],
       ['Best Streak', String(stats.bestStreak)],
+      ['Best Combo', stats.bestCombo >= 2 ? stats.bestCombo + 'x' : '-'],
     ]
     const rowH = 28
     const startY = by + 60
@@ -527,6 +544,53 @@ export function createRenderer(): Renderer {
     const closeBtnY = by + boxH - 48
     drawPixelButton(ctx, closeBtnX, closeBtnY, closeBtnW, closeBtnH, 'CLOSE', 12)
     hitAreas.push({ x: closeBtnX, y: closeBtnY, w: closeBtnW, h: closeBtnH, action: 'close-stats' })
+  }
+
+  function renderCombo(
+    ctx: CanvasRenderingContext2D,
+    gridX: number,
+    gridY: number,
+    gridSize: number,
+  ): void {
+    if (comboAnim === null) return
+    const { count, t } = comboAnim
+    // Scale: 0.5 → 1.2 (first 30%), hold 1.2 (30%-50%), then fade out
+    let scale: number
+    let alpha: number
+    if (t < 0.3) {
+      scale = 0.5 + (0.7 * t) / 0.3
+      alpha = 1
+    } else if (t < 0.5) {
+      scale = 1.2
+      alpha = 1
+    } else {
+      scale = 1.2 - 0.2 * ((t - 0.5) / 0.5)
+      alpha = 1 - (t - 0.5) / 0.5
+    }
+    if (alpha <= 0) return
+    const cx = Math.round(gridX + gridSize / 2)
+    const cy = Math.round(gridY + gridSize * 0.15)
+    const text = String(count) + 'x COMBO!'
+    const baseFontSize = Math.round(gridSize * 0.1)
+    const fontSize = Math.round(baseFontSize * scale)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    // Pixel art outline (draw text offset in each direction with dark color)
+    const outlineOffset = Math.max(2, Math.round(fontSize * 0.06))
+    ctx.font = 'bold ' + String(fontSize) + 'px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = '#1a1a2e'
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+      ctx.fillText(text, cx + dx * outlineOffset, cy + dy * outlineOffset)
+    }
+    // Gold fill with glow
+    ctx.shadowColor = '#FFD700'
+    ctx.shadowBlur = fontSize * 0.3
+    ctx.fillStyle = '#FFD700'
+    ctx.fillText(text, cx, cy)
+    ctx.shadowBlur = 0
+    ctx.restore()
   }
 
   function renderScoreDeltas(
@@ -595,6 +659,7 @@ export function createRenderer(): Renderer {
       renderAnimTile(ctx, px, py, tileSize, tile.value, animScale, mergeFlashAlpha)
     }
     renderScoreDeltas(ctx, gridX, gridY, gap, tileSize)
+    renderCombo(ctx, gridX, gridY, gridSize)
     if (undoAvailable && !isOver && !isWon) {
       drawUndoButton(ctx, gridX, gridY, gridSize)
     }

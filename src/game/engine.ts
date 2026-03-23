@@ -289,6 +289,10 @@ function findSpawnedPos(postSlideGrid: Grid, finalGrid: Grid): [number, number] 
   return null
 }
 
+export function countMerges(motions: TileMotion[]): number {
+  return motions.filter((m) => m.absorbed).length
+}
+
 export function moveDetailed(state: GameState, direction: Direction): MoveDetail {
   if (state.over) return { state, motions: [], spawnedAt: null }
   const motions = computeMotions(state.grid, direction)

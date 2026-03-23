@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  countMerges,
   createGrid,
   createInitialState,
   isGameOver,
@@ -506,5 +507,68 @@ describe('moveDetailed - 모션 추적', () => {
     const detail = moveDetailed(state, 'left')
     expect(detail.spawnedAt).not.toBeNull()
     vi.restoreAllMocks()
+  })
+})
+
+describe('countMerges', () => {
+  it('병합이 없을 때 0을 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [0, 0, 0, 2],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(countMerges(detail.motions)).toBe(0)
+  })
+  it('한 행에서 1개 병합 시 1을 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 2, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(countMerges(detail.motions)).toBe(1)
+  })
+  it('한 행에서 [2,2,2,2] 이동 시 2개 병합을 반환한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 2, 2, 2],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(countMerges(detail.motions)).toBe(2)
+  })
+  it('여러 행에서 동시 병합 시 합산한다', () => {
+    const state: GameState = {
+      grid: makeGrid([
+        [2, 2, 0, 0],
+        [4, 4, 0, 0],
+        [8, 8, 0, 0],
+        [0, 0, 0, 0],
+      ]),
+      score: 0,
+      won: false,
+      over: false,
+    }
+    const detail = moveDetailed(state, 'left')
+    expect(countMerges(detail.motions)).toBe(3)
   })
 })
