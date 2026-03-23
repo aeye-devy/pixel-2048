@@ -1,0 +1,26 @@
+{
+  "name": "Pixel 2048",
+  "short_name": "2048",
+  "description": "A pixel art 2048 game by Fanxy",
+  "start_url": "./",
+  "display": "fullscreen",
+  "theme_color": "#1a1a2e",
+  "background_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "fanxy-logo-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "fanxy-logo-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "fanxy-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
