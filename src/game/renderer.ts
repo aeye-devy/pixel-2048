@@ -37,7 +37,7 @@ interface HitArea {
   action: ButtonAction
 }
 
-export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue'
+export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute'
 
 export interface RenderOptions {
   score: number
@@ -47,6 +47,7 @@ export interface RenderOptions {
   undoAvailable: boolean
   continueWithAdAvailable: boolean
   isAdPlaying: boolean
+  isMuted: boolean
 }
 
 export interface Renderer {
@@ -263,11 +264,48 @@ export function createRenderer(): Renderer {
     ctx.fillText(String(value), rx + Math.round(w / 2), ry + h - 6)
   }
 
+  function drawMuteButton(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    muted: boolean,
+  ): void {
+    const rx = Math.round(x)
+    const ry = Math.round(y)
+    // Background
+    ctx.fillStyle = muted ? '#5a2a2a' : '#2d3154'
+    ctx.fillRect(rx, ry, size, size)
+    // Pixel art speaker icon using small rectangles
+    const p = Math.max(2, Math.floor(size / 8)) // pixel unit
+    const cx = rx + Math.floor(size / 2)
+    const cy = ry + Math.floor(size / 2)
+    ctx.fillStyle = '#f9f6f2'
+    // Speaker body (left rectangle)
+    ctx.fillRect(cx - 3 * p, cy - p, 2 * p, 2 * p)
+    // Speaker cone (triangle approximation with rectangles)
+    ctx.fillRect(cx - p, cy - 2 * p, p, 4 * p)
+    // Sound waves (right side)
+    if (!muted) {
+      ctx.fillRect(cx + p, cy - p, p, 2 * p)
+      ctx.fillRect(cx + 2 * p, cy - 2 * p, p, 4 * p)
+    } else {
+      // X mark for muted
+      ctx.fillStyle = '#ff6666'
+      ctx.fillRect(cx + p, cy - 2 * p, p, p)
+      ctx.fillRect(cx + 2 * p, cy - p, p, p)
+      ctx.fillRect(cx + 2 * p, cy + p, p, p)
+      ctx.fillRect(cx + p, cy + 2 * p, p, p)
+    }
+    hitAreas.push({ x: rx, y: ry, w: size, h: size, action: 'mute' })
+  }
+
   function drawHeader(
     ctx: CanvasRenderingContext2D,
     width: number,
     score: number,
     bestScore: number,
+    isMuted: boolean,
   ): void {
     ctx.fillStyle = HEADER_BG
     ctx.fillRect(0, 0, width, HEADER_H)
@@ -276,6 +314,11 @@ export function createRenderer(): Renderer {
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
     ctx.fillText('2048', 16, HEADER_H / 2)
+    // Mute button next to title
+    const muteSize = 32
+    const muteX = 16 + 78 // after "2048" text
+    const muteY = Math.round((HEADER_H - muteSize) / 2)
+    drawMuteButton(ctx, muteX, muteY, muteSize, isMuted)
     const itemW = Math.min(84, Math.floor(width * 0.21))
     const boxH = 52
     const btnH = 38
@@ -393,13 +436,13 @@ export function createRenderer(): Renderer {
     height: number,
     opts: RenderOptions,
   ): void {
-    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying } =
+    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying, isMuted } =
       opts
     hitAreas = []
     ctx.imageSmoothingEnabled = false
     ctx.fillStyle = BG_COLOR
     ctx.fillRect(0, 0, width, height)
-    drawHeader(ctx, width, score, bestScore)
+    drawHeader(ctx, width, score, bestScore, isMuted)
     const { gridX, gridY, gridSize, gap, tileSize } = getGridLayout(width, height)
     ctx.fillStyle = GRID_BG_COLOR
     ctx.fillRect(gridX, gridY, gridSize, gridSize)

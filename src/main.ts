@@ -4,6 +4,7 @@ import type { Direction, GameState } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
 import { createMockAdProvider } from './ads/adProvider.js'
 import { fireAdEvent } from './ads/analytics.js'
+import { createSoundEngine } from './audio/soundEngine.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
@@ -40,6 +41,7 @@ let continuesUsed = 0
 let adPlaying = false
 const renderer = createRenderer()
 const adProvider = createMockAdProvider()
+const sound = createSoundEngine()
 renderer.init(gameState)
 
 let inputLocked = false
@@ -48,6 +50,7 @@ function handleDirection(dir: Direction): void {
   if (inputLocked || gameState.over || adPlaying) return
   const detail = moveDetailed(gameState, dir)
   if (detail.state === gameState) return
+  const prevWon = gameState.won
   previousState = gameState
   gameState = detail.state
   if (gameState.score > bestScore) {
@@ -55,6 +58,22 @@ function handleDirection(dir: Direction): void {
     saveBestScore(bestScore)
   }
   renderer.applyMove(detail.motions, detail.spawnedAt, detail.state)
+  // Audio: find highest merge value from motions
+  const mergeMotion = detail.motions.find((m) => !m.absorbed && m.value > 0 &&
+    detail.motions.some((a) => a.absorbed && a.toRow === m.toRow && a.toCol === m.toCol))
+  if (mergeMotion) {
+    sound.play('merge', mergeMotion.value)
+  } else if (detail.motions.length > 0) {
+    sound.play('slide')
+  }
+  if (detail.spawnedAt !== null) {
+    setTimeout(() => { sound.play('spawn') }, 100)
+  }
+  if (gameState.won && !prevWon) {
+    setTimeout(() => { sound.play('win') }, 200)
+  } else if (gameState.over) {
+    setTimeout(() => { sound.play('gameOver') }, 200)
+  }
   inputLocked = true
   setTimeout(() => {
     inputLocked = false
@@ -113,6 +132,7 @@ async function handleWatchAdContinue(): Promise<void> {
 }
 
 function handleCanvasTap(clientX: number, clientY: number): void {
+  sound.unlock() // resume AudioContext on user gesture (mobile requirement)
   if (adPlaying) return
   const rect = canvas.getBoundingClientRect()
   const scaleX = canvas.width / rect.width
@@ -120,6 +140,12 @@ function handleCanvasTap(clientX: number, clientY: number): void {
   const px = (clientX - rect.left) * scaleX
   const py = (clientY - rect.top) * scaleY
   const action = renderer.getButtonAt(px, py)
+  if (action === 'mute') {
+    sound.toggleMute()
+    sound.play('buttonTap')
+    return
+  }
+  if (action !== null) sound.play('buttonTap')
   if (action === 'new-game') newGame()
   else if (action === 'continue') continueGame()
   else if (action === 'undo') void handleWatchAdUndo()
@@ -138,6 +164,7 @@ const KEY_MAP: Record<string, Direction> = {
 }
 
 window.addEventListener('keydown', (e: KeyboardEvent) => {
+  sound.unlock()
   const dir = KEY_MAP[e.key]
   if (dir !== undefined) {
     e.preventDefault()
@@ -146,6 +173,9 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
   }
   if (e.key === 'r' || e.key === 'R') {
     newGame()
+  }
+  if (e.key === 'm' || e.key === 'M') {
+    sound.toggleMute()
   }
 })
 
@@ -206,6 +236,7 @@ const loop = createGameLoop(
       undoAvailable,
       continueWithAdAvailable: gameState.over && continuesUsed < MAX_CONTINUES_PER_GAME,
       isAdPlaying: adPlaying,
+      isMuted: sound.isMuted(),
     })
   },
 )
