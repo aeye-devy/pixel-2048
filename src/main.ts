@@ -6,6 +6,7 @@ import { createMockAdProvider } from './ads/adProvider.js'
 import { fireAdEvent, trackEvent, trackPageView } from './ads/analytics.js'
 import { createSoundEngine } from './audio/soundEngine.js'
 import { loadStats, saveStats, recordGameEnd, updateBestCombo } from './game/stats.js'
+import { shareScore } from './render/shareCard.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
@@ -169,6 +170,12 @@ async function handleWatchAdContinue(): Promise<void> {
   }
 }
 
+async function handleShare(): Promise<void> {
+  if (adPlaying) return
+  const result = await shareScore(gameState.grid, gameState.score, gameState.won)
+  trackEvent('share', { score: gameState.score, method: result })
+}
+
 function handleCanvasTap(clientX: number, clientY: number): void {
   sound.unlock() // resume AudioContext on user gesture (mobile requirement)
   if (adPlaying) return
@@ -195,6 +202,7 @@ function handleCanvasTap(clientX: number, clientY: number): void {
   else if (action === 'undo') void handleWatchAdUndo()
   else if (action === 'watch-ad-continue') void handleWatchAdContinue()
   else if (action === 'stats') { showStats = true }
+  else if (action === 'share') void handleShare()
 }
 
 const KEY_MAP: Record<string, Direction> = {

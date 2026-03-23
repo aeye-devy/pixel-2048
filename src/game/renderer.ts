@@ -55,7 +55,7 @@ interface HitArea {
   action: ButtonAction
 }
 
-export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute' | 'stats' | 'close-stats'
+export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute' | 'stats' | 'close-stats' | 'share'
 
 export interface RenderOptions {
   score: number
@@ -395,14 +395,14 @@ export function createRenderer(): Renderer {
     ctx.font = 'bold ' + String(titleFontSize) + 'px "Courier New", monospace'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(isOver ? 'GAME OVER' : 'YOU WIN!', cx, Math.round(gridY + gridSize * 0.36))
+    ctx.fillText(isOver ? 'GAME OVER' : 'YOU WIN!', cx, Math.round(gridY + gridSize * 0.32))
     const scoreFontSize = Math.round(gridSize * 0.065)
     ctx.font = String(scoreFontSize) + 'px "Courier New", monospace'
-    ctx.fillText('Score: ' + String(score), cx, Math.round(gridY + gridSize * 0.52))
+    ctx.fillText('Score: ' + String(score), cx, Math.round(gridY + gridSize * 0.46))
     const btnW = Math.round(gridSize * 0.42)
     const btnH = Math.round(Math.max(32, gridSize * 0.1))
     const btnFontSize = Math.round(Math.max(10, gridSize * 0.055))
-    const btnY = Math.round(gridY + gridSize * 0.64)
+    const btnY = Math.round(gridY + gridSize * 0.56)
     if (!isOver) {
       // Win overlay: CONTINUE (no ad) + NEW GAME
       const spacing = Math.round(gridSize * 0.04)
@@ -427,6 +427,13 @@ export function createRenderer(): Renderer {
       drawPixelButton(ctx, btnX, btnY, btnW, btnH, 'NEW GAME', btnFontSize)
       hitAreas.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: 'new-game' })
     }
+    // SHARE button below main buttons
+    const shareBtnW = Math.round(gridSize * 0.32)
+    const shareBtnH = btnH
+    const shareBtnX = cx - Math.round(shareBtnW / 2)
+    const shareBtnY = btnY + btnH + Math.round(gridSize * 0.04)
+    drawPixelButton(ctx, shareBtnX, shareBtnY, shareBtnW, shareBtnH, 'SHARE', btnFontSize, '#2a5a3a')
+    hitAreas.push({ x: shareBtnX, y: shareBtnY, w: shareBtnW, h: shareBtnH, action: 'share' })
   }
 
   function drawUndoButton(

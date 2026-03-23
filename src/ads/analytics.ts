@@ -7,6 +7,7 @@ export type GameEvent =
   | 'ad_skipped'
   | 'ad_failed'
   | 'page_view'
+  | 'share'
 
 type EventPayload = Record<string, unknown>
 
