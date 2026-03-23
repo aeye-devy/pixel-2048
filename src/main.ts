@@ -3,7 +3,7 @@ import { createInitialState, moveDetailed, continueAfterGameOver } from './game/
 import type { Direction, GameState } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
 import { createMockAdProvider } from './ads/adProvider.js'
-import { fireAdEvent } from './ads/analytics.js'
+import { fireAdEvent, trackEvent, trackPageView } from './ads/analytics.js'
 import { createSoundEngine } from './audio/soundEngine.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
@@ -70,8 +70,10 @@ function handleDirection(dir: Direction): void {
     setTimeout(() => { sound.play('spawn') }, 100)
   }
   if (gameState.won && !prevWon) {
+    trackEvent('win_2048', { score: gameState.score })
     setTimeout(() => { sound.play('win') }, 200)
   } else if (gameState.over) {
+    trackEvent('game_over', { score: gameState.score })
     setTimeout(() => { sound.play('gameOver') }, 200)
   }
   inputLocked = true
@@ -88,6 +90,7 @@ function newGame(): void {
   continuesUsed = 0
   adPlaying = false
   renderer.init(gameState)
+  trackEvent('game_start')
 }
 
 function continueGame(): void {
@@ -241,4 +244,6 @@ const loop = createGameLoop(
   },
 )
 
+trackPageView()
+trackEvent('game_start')
 loop.start()
