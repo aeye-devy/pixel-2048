@@ -1,4 +1,5 @@
 import type { GameState, TileMotion } from './engine.js'
+import type { GameStats } from './stats.js'
 import { drawTile as paintTile, drawEmptyTile } from '../render/tilePainter.js'
 import { TILE_STYLES, FALLBACK_STYLE } from '../render/tileStyle.js'
 import { drawText } from '../render/bitmapFont.js'
@@ -48,7 +49,7 @@ interface HitArea {
   action: ButtonAction
 }
 
-export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute'
+export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute' | 'stats' | 'close-stats'
 
 export interface RenderOptions {
   score: number
@@ -59,6 +60,8 @@ export interface RenderOptions {
   continueWithAdAvailable: boolean
   isAdPlaying: boolean
   isMuted: boolean
+  showStats: boolean
+  stats: GameStats
 }
 
 export interface Renderer {
@@ -346,10 +349,14 @@ export function createRenderer(): Renderer {
     const itemGap = 8
     const boxY = Math.round((HEADER_H - boxH) / 2)
     const btnY = Math.round((HEADER_H - btnH) / 2)
+    // Right side: NEW GAME | STATS | BEST | SCORE
     const btnX = width - edgeMargin - itemW
     drawPixelButton(ctx, btnX, btnY, itemW, btnH, 'NEW GAME', 10)
     hitAreas.push({ x: btnX, y: btnY, w: itemW, h: btnH, action: 'new-game' })
-    const bestX = btnX - itemGap - itemW
+    const statsX = btnX - itemGap - itemW
+    drawPixelButton(ctx, statsX, btnY, itemW, btnH, 'STATS', 10)
+    hitAreas.push({ x: statsX, y: btnY, w: itemW, h: btnH, action: 'stats' })
+    const bestX = statsX - itemGap - itemW
     drawScoreBox(ctx, bestX, boxY, itemW, boxH, 'BEST', bestScore)
     const scoreX = bestX - itemGap - itemW
     drawScoreBox(ctx, scoreX, boxY, itemW, boxH, 'SCORE', score)
@@ -450,6 +457,78 @@ export function createRenderer(): Renderer {
     ctx.fillText('Please wait a moment', Math.round(bx + boxW / 2), Math.round(by + boxH / 2 + 16))
   }
 
+  function drawStatsOverlay(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    stats: GameStats,
+  ): void {
+    // Full screen dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'
+    ctx.fillRect(0, 0, width, height)
+    const boxW = Math.min(320, width - 40)
+    const boxH = 310
+    const bx = Math.round((width - boxW) / 2)
+    const by = Math.round((height - boxH) / 2)
+    // Box background with pixel border
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(bx, by, boxW, boxH)
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'
+    ctx.fillRect(bx, by, boxW, 2)
+    ctx.fillRect(bx, by, 2, boxH)
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.fillRect(bx, by + boxH - 2, boxW, 2)
+    ctx.fillRect(bx + boxW - 2, by, 2, boxH)
+    // Title
+    const cx = Math.round(bx + boxW / 2)
+    ctx.fillStyle = '#edc22e'
+    ctx.font = 'bold 20px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('STATISTICS', cx, by + 30)
+    // Stats rows
+    const winRate = stats.gamesPlayed > 0 ? Math.round((stats.wins / stats.gamesPlayed) * 100) : 0
+    const rows: [string, string][] = [
+      ['Games Played', String(stats.gamesPlayed)],
+      ['Highest Tile', String(stats.highestTile)],
+      ['Total Score', String(stats.totalScore)],
+      ['Wins (2048)', String(stats.wins)],
+      ['Win Rate', winRate + '%'],
+      ['Current Streak', String(stats.currentStreak)],
+      ['Best Streak', String(stats.bestStreak)],
+    ]
+    const rowH = 28
+    const startY = by + 60
+    const padX = 20
+    for (let i = 0; i < rows.length; i++) {
+      const entry = rows[i]
+      if (!entry) continue
+      const [label, value] = entry
+      const ry = startY + i * rowH
+      // Alternating subtle row background
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)'
+        ctx.fillRect(bx + 4, ry - 10, boxW - 8, rowH)
+      }
+      ctx.fillStyle = '#bbada0'
+      ctx.font = '13px "Courier New", monospace'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, bx + padX, ry + 4)
+      ctx.fillStyle = '#f9f6f2'
+      ctx.font = 'bold 14px "Courier New", monospace'
+      ctx.textAlign = 'right'
+      ctx.fillText(value, bx + boxW - padX, ry + 4)
+    }
+    // Close button
+    const closeBtnW = Math.round(boxW * 0.5)
+    const closeBtnH = 34
+    const closeBtnX = cx - Math.round(closeBtnW / 2)
+    const closeBtnY = by + boxH - 48
+    drawPixelButton(ctx, closeBtnX, closeBtnY, closeBtnW, closeBtnH, 'CLOSE', 12)
+    hitAreas.push({ x: closeBtnX, y: closeBtnY, w: closeBtnW, h: closeBtnH, action: 'close-stats' })
+  }
+
   function renderScoreDeltas(
     ctx: CanvasRenderingContext2D,
     gridX: number,
@@ -483,7 +562,7 @@ export function createRenderer(): Renderer {
     height: number,
     opts: RenderOptions,
   ): void {
-    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying, isMuted } =
+    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying, isMuted, showStats, stats } =
       opts
     hitAreas = []
     ctx.imageSmoothingEnabled = false
@@ -524,6 +603,9 @@ export function createRenderer(): Renderer {
     }
     if (isAdPlaying) {
       drawAdOverlay(ctx, width, height)
+    }
+    if (showStats) {
+      drawStatsOverlay(ctx, width, height, stats)
     }
   }
 

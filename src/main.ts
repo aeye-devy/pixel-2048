@@ -1,16 +1,28 @@
 import { createGameLoop } from './game/loop.js'
 import { createInitialState, moveDetailed, continueAfterGameOver } from './game/engine.js'
-import type { Direction, GameState } from './game/engine.js'
+import type { Direction, GameState, Grid } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
 import { createMockAdProvider } from './ads/adProvider.js'
 import { fireAdEvent, trackEvent, trackPageView } from './ads/analytics.js'
 import { createSoundEngine } from './audio/soundEngine.js'
+import { loadStats, saveStats, recordGameEnd } from './game/stats.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
 const BEST_SCORE_KEY = 'pixel2048-best'
 const MAX_UNDOS_PER_GAME = 1
 const MAX_CONTINUES_PER_GAME = 1
+const GRID_CELLS = 16
+
+function boardTension(grid: Grid): number {
+  let empty = 0
+  for (const row of grid) {
+    for (const cell of row) {
+      if (cell === 0) empty++
+    }
+  }
+  return 1 - empty / GRID_CELLS
+}
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')
@@ -39,15 +51,19 @@ let previousState: GameState | null = null
 let undosUsed = 0
 let continuesUsed = 0
 let adPlaying = false
+let showStats = false
+let gameStats = loadStats()
+let gameEndRecorded = false
 const renderer = createRenderer()
 const adProvider = createMockAdProvider()
 const sound = createSoundEngine()
 renderer.init(gameState)
+sound.startBgm()
 
 let inputLocked = false
 
 function handleDirection(dir: Direction): void {
-  if (inputLocked || gameState.over || adPlaying) return
+  if (inputLocked || gameState.over || adPlaying || showStats) return
   const detail = moveDetailed(gameState, dir)
   if (detail.state === gameState) return
   const prevWon = gameState.won
@@ -72,10 +88,16 @@ function handleDirection(dir: Direction): void {
   if (gameState.won && !prevWon) {
     trackEvent('win_2048', { score: gameState.score })
     setTimeout(() => { sound.play('win') }, 200)
-  } else if (gameState.over) {
+  }
+  if (gameState.over && !gameEndRecorded) {
     trackEvent('game_over', { score: gameState.score })
     setTimeout(() => { sound.play('gameOver') }, 200)
+    sound.stopBgm()
+    gameStats = recordGameEnd(gameStats, gameState.grid, gameState.score, gameState.won)
+    saveStats(gameStats)
+    gameEndRecorded = true
   }
+  sound.setBgmTension(boardTension(gameState.grid))
   inputLocked = true
   setTimeout(() => {
     inputLocked = false
@@ -89,7 +111,11 @@ function newGame(): void {
   undosUsed = 0
   continuesUsed = 0
   adPlaying = false
+  gameEndRecorded = false
+  showStats = false
   renderer.init(gameState)
+  sound.setBgmTension(0)
+  sound.startBgm()
   trackEvent('game_start')
 }
 
@@ -127,6 +153,8 @@ async function handleWatchAdContinue(): Promise<void> {
     gameState = continueAfterGameOver(gameState)
     continuesUsed++
     renderer.init(gameState)
+    sound.setBgmTension(boardTension(gameState.grid))
+    sound.startBgm()
   } else if (result === 'skipped') {
     fireAdEvent('ad_skipped', { placement: 'continue' })
   } else {
@@ -148,11 +176,18 @@ function handleCanvasTap(clientX: number, clientY: number): void {
     sound.play('buttonTap')
     return
   }
+  if (action === 'close-stats') {
+    showStats = false
+    sound.play('buttonTap')
+    return
+  }
+  if (showStats) return // block all other actions while stats overlay is open
   if (action !== null) sound.play('buttonTap')
   if (action === 'new-game') newGame()
   else if (action === 'continue') continueGame()
   else if (action === 'undo') void handleWatchAdUndo()
   else if (action === 'watch-ad-continue') void handleWatchAdContinue()
+  else if (action === 'stats') { showStats = true }
 }
 
 const KEY_MAP: Record<string, Direction> = {
@@ -172,6 +207,10 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
   if (dir !== undefined) {
     e.preventDefault()
     handleDirection(dir)
+    return
+  }
+  if (e.key === 'Escape' && showStats) {
+    showStats = false
     return
   }
   if (e.key === 'r' || e.key === 'R') {
@@ -240,6 +279,8 @@ const loop = createGameLoop(
       continueWithAdAvailable: gameState.over && continuesUsed < MAX_CONTINUES_PER_GAME,
       isAdPlaying: adPlaying,
       isMuted: sound.isMuted(),
+      showStats,
+      stats: gameStats,
     })
   },
 )
