@@ -1,12 +1,14 @@
 import { createGameLoop } from './game/loop.js'
 import { createInitialState, moveDetailed, continueAfterGameOver, countMerges } from './game/engine.js'
-import type { Direction, GameState, Grid } from './game/engine.js'
+import type { Direction, GameState, Grid, RngFn } from './game/engine.js'
 import { createRenderer } from './game/renderer.js'
 import { createMockAdProvider } from './ads/adProvider.js'
 import { fireAdEvent, trackEvent, trackPageView } from './ads/analytics.js'
 import { createSoundEngine } from './audio/soundEngine.js'
 import { loadStats, saveStats, recordGameEnd, updateBestCombo } from './game/stats.js'
 import { shareScore } from './render/shareCard.js'
+import { loadDailyData, saveDailyData, hasPlayedToday, getTodayResult, recordDailyResult, createDailyState, todayDateStr } from './game/daily.js'
+import type { DailyData } from './game/daily.js'
 
 const INPUT_LOCK_MS = 180 // block input during slide animation
 const SWIPE_THRESHOLD = 30 // minimum pixels to register a swipe
@@ -61,16 +63,24 @@ const sound = createSoundEngine()
 renderer.init(gameState)
 sound.startBgm()
 
+// Daily challenge state
+let isDailyMode = false
+let dailyRng: RngFn | null = null
+let dailyData: DailyData = loadDailyData()
+let showDailyOverlay = false
+let dailyGameEndRecorded = false
+
 let inputLocked = false
 
 function handleDirection(dir: Direction): void {
-  if (inputLocked || gameState.over || adPlaying || showStats) return
-  const detail = moveDetailed(gameState, dir)
+  if (inputLocked || gameState.over || adPlaying || showStats || showDailyOverlay) return
+  const rng = isDailyMode ? dailyRng ?? undefined : undefined
+  const detail = moveDetailed(gameState, dir, rng)
   if (detail.state === gameState) return
   const prevWon = gameState.won
   previousState = gameState
   gameState = detail.state
-  if (gameState.score > bestScore) {
+  if (!isDailyMode && gameState.score > bestScore) {
     bestScore = gameState.score
     saveBestScore(bestScore)
   }
@@ -86,7 +96,7 @@ function handleDirection(dir: Direction): void {
   } else if (detail.motions.length > 0) {
     sound.play('slide')
   }
-  if (mergeCount >= 2) {
+  if (!isDailyMode && mergeCount >= 2) {
     gameStats = updateBestCombo(gameStats, mergeCount)
     saveStats(gameStats)
   }
@@ -94,16 +104,25 @@ function handleDirection(dir: Direction): void {
     setTimeout(() => { sound.play('spawn') }, 100)
   }
   if (gameState.won && !prevWon) {
-    trackEvent('win_2048', { score: gameState.score })
+    trackEvent(isDailyMode ? 'daily_win_2048' : 'win_2048', { score: gameState.score })
     setTimeout(() => { sound.play('win') }, 200)
   }
-  if (gameState.over && !gameEndRecorded) {
-    trackEvent('game_over', { score: gameState.score })
-    setTimeout(() => { sound.play('gameOver') }, 200)
-    sound.stopBgm()
-    gameStats = recordGameEnd(gameStats, gameState.grid, gameState.score, gameState.won)
-    saveStats(gameStats)
-    gameEndRecorded = true
+  if (gameState.over) {
+    if (isDailyMode && !dailyGameEndRecorded) {
+      trackEvent('daily_game_over', { score: gameState.score })
+      setTimeout(() => { sound.play('gameOver') }, 200)
+      sound.stopBgm()
+      dailyData = recordDailyResult(dailyData, gameState.grid, gameState.score, gameState.won)
+      saveDailyData(dailyData)
+      dailyGameEndRecorded = true
+    } else if (!isDailyMode && !gameEndRecorded) {
+      trackEvent('game_over', { score: gameState.score })
+      setTimeout(() => { sound.play('gameOver') }, 200)
+      sound.stopBgm()
+      gameStats = recordGameEnd(gameStats, gameState.grid, gameState.score, gameState.won)
+      saveStats(gameStats)
+      gameEndRecorded = true
+    }
   }
   sound.setBgmTension(boardTension(gameState.grid))
   inputLocked = true
@@ -113,6 +132,9 @@ function handleDirection(dir: Direction): void {
 }
 
 function newGame(): void {
+  isDailyMode = false
+  dailyRng = null
+  dailyGameEndRecorded = false
   gameState = createInitialState()
   continueMode = false
   previousState = null
@@ -121,10 +143,37 @@ function newGame(): void {
   adPlaying = false
   gameEndRecorded = false
   showStats = false
+  showDailyOverlay = false
   renderer.init(gameState)
   sound.setBgmTension(0)
   sound.startBgm()
   trackEvent('game_start')
+}
+
+function startDailyChallenge(): void {
+  const dateStr = todayDateStr()
+  const daily = createDailyState(dateStr)
+  isDailyMode = true
+  dailyRng = daily.rng
+  dailyGameEndRecorded = false
+  gameState = daily.state
+  continueMode = false
+  previousState = null
+  undosUsed = 0
+  continuesUsed = 0
+  adPlaying = false
+  gameEndRecorded = false
+  showStats = false
+  showDailyOverlay = false
+  renderer.init(gameState)
+  sound.setBgmTension(0)
+  sound.startBgm()
+  trackEvent('daily_start', { date: dateStr })
+}
+
+function handleDailyButton(): void {
+  dailyData = loadDailyData()
+  showDailyOverlay = true
 }
 
 function continueGame(): void {
@@ -132,6 +181,7 @@ function continueGame(): void {
 }
 
 async function handleWatchAdUndo(): Promise<void> {
+  if (isDailyMode) return // no ads in daily mode
   if (undosUsed >= MAX_UNDOS_PER_GAME || previousState === null || adPlaying) return
   fireAdEvent('ad_prompt_shown', { placement: 'undo' })
   adPlaying = true
@@ -151,6 +201,7 @@ async function handleWatchAdUndo(): Promise<void> {
 }
 
 async function handleWatchAdContinue(): Promise<void> {
+  if (isDailyMode) return // no continues in daily mode
   if (continuesUsed >= MAX_CONTINUES_PER_GAME || !gameState.over || adPlaying) return
   fireAdEvent('ad_prompt_shown', { placement: 'continue' })
   adPlaying = true
@@ -195,9 +246,24 @@ function handleCanvasTap(clientX: number, clientY: number): void {
     sound.play('buttonTap')
     return
   }
-  if (showStats) return // block all other actions while stats overlay is open
+  if (action === 'close-daily') {
+    showDailyOverlay = false
+    sound.play('buttonTap')
+    return
+  }
+  if (showStats || showDailyOverlay) {
+    if (action === 'daily-play') {
+      if (!hasPlayedToday(dailyData)) {
+        sound.play('buttonTap')
+        startDailyChallenge()
+      }
+      return
+    }
+    return // block all other actions while overlay is open
+  }
   if (action !== null) sound.play('buttonTap')
   if (action === 'new-game') newGame()
+  else if (action === 'daily') handleDailyButton()
   else if (action === 'continue') continueGame()
   else if (action === 'undo') void handleWatchAdUndo()
   else if (action === 'watch-ad-continue') void handleWatchAdContinue()
@@ -224,9 +290,9 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
     handleDirection(dir)
     return
   }
-  if (e.key === 'Escape' && showStats) {
-    showStats = false
-    return
+  if (e.key === 'Escape') {
+    if (showStats) { showStats = false; return }
+    if (showDailyOverlay) { showDailyOverlay = false; return }
   }
   if (e.key === 'r' || e.key === 'R') {
     newGame()
@@ -284,18 +350,22 @@ const loop = createGameLoop(
     renderer.update(dt)
   },
   (renderCtx) => {
-    const undoAvailable = previousState !== null && undosUsed < MAX_UNDOS_PER_GAME
+    const undoAvailable = !isDailyMode && previousState !== null && undosUsed < MAX_UNDOS_PER_GAME
     renderer.render(renderCtx, canvas.width, canvas.height, {
       score: gameState.score,
       bestScore,
       isOver: gameState.over,
       isWon: gameState.won && !continueMode,
       undoAvailable,
-      continueWithAdAvailable: gameState.over && continuesUsed < MAX_CONTINUES_PER_GAME,
+      continueWithAdAvailable: !isDailyMode && gameState.over && continuesUsed < MAX_CONTINUES_PER_GAME,
       isAdPlaying: adPlaying,
       isMuted: sound.isMuted(),
       showStats,
       stats: gameStats,
+      isDailyMode,
+      showDailyOverlay,
+      dailyData: showDailyOverlay ? dailyData : null,
+      dailyResult: showDailyOverlay ? getTodayResult(dailyData) : null,
     })
   },
 )

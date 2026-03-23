@@ -8,6 +8,9 @@ export type GameEvent =
   | 'ad_failed'
   | 'page_view'
   | 'share'
+  | 'daily_start'
+  | 'daily_game_over'
+  | 'daily_win_2048'
 
 type EventPayload = Record<string, unknown>
 

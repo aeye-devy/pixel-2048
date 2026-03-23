@@ -1,5 +1,6 @@
 import type { GameState, TileMotion } from './engine.js'
 import type { GameStats } from './stats.js'
+import type { DailyData, DailyResult } from './daily.js'
 import { drawTile as paintTile, drawEmptyTile } from '../render/tilePainter.js'
 import { TILE_STYLES, FALLBACK_STYLE } from '../render/tileStyle.js'
 import { drawText } from '../render/bitmapFont.js'
@@ -55,7 +56,7 @@ interface HitArea {
   action: ButtonAction
 }
 
-export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute' | 'stats' | 'close-stats' | 'share'
+export type ButtonAction = 'new-game' | 'continue' | 'undo' | 'watch-ad-continue' | 'mute' | 'stats' | 'close-stats' | 'share' | 'daily' | 'daily-play' | 'close-daily'
 
 export interface RenderOptions {
   score: number
@@ -68,6 +69,10 @@ export interface RenderOptions {
   isMuted: boolean
   showStats: boolean
   stats: GameStats
+  isDailyMode: boolean
+  showDailyOverlay: boolean
+  dailyData: DailyData | null
+  dailyResult: DailyResult | null
 }
 
 export interface Renderer {
@@ -345,6 +350,7 @@ export function createRenderer(): Renderer {
     score: number,
     bestScore: number,
     isMuted: boolean,
+    isDailyMode: boolean,
   ): void {
     ctx.fillStyle = HEADER_BG
     ctx.fillRect(0, 0, width, HEADER_H)
@@ -365,11 +371,15 @@ export function createRenderer(): Renderer {
     const itemGap = 8
     const boxY = Math.round((HEADER_H - boxH) / 2)
     const btnY = Math.round((HEADER_H - btnH) / 2)
-    // Right side: NEW GAME | STATS | BEST | SCORE
+    // Right side: NEW GAME | DAILY | STATS | BEST | SCORE
     const btnX = width - edgeMargin - itemW
     drawPixelButton(ctx, btnX, btnY, itemW, btnH, 'NEW GAME', 10)
     hitAreas.push({ x: btnX, y: btnY, w: itemW, h: btnH, action: 'new-game' })
-    const statsX = btnX - itemGap - itemW
+    const dailyX = btnX - itemGap - itemW
+    const dailyBg = isDailyMode ? '#2a5a3a' : '#5a4a10'
+    drawPixelButton(ctx, dailyX, btnY, itemW, btnH, 'DAILY', 10, dailyBg)
+    hitAreas.push({ x: dailyX, y: btnY, w: itemW, h: btnH, action: 'daily' })
+    const statsX = dailyX - itemGap - itemW
     drawPixelButton(ctx, statsX, btnY, itemW, btnH, 'STATS', 10)
     hitAreas.push({ x: statsX, y: btnY, w: itemW, h: btnH, action: 'stats' })
     const bestX = statsX - itemGap - itemW
@@ -516,10 +526,10 @@ export function createRenderer(): Renderer {
       ['Highest Tile', String(stats.highestTile)],
       ['Total Score', String(stats.totalScore)],
       ['Wins (2048)', String(stats.wins)],
-      ['Win Rate', winRate + '%'],
+      ['Win Rate', String(winRate) + '%'],
       ['Current Streak', String(stats.currentStreak)],
       ['Best Streak', String(stats.bestStreak)],
-      ['Best Combo', stats.bestCombo >= 2 ? stats.bestCombo + 'x' : '-'],
+      ['Best Combo', stats.bestCombo >= 2 ? String(stats.bestCombo) + 'x' : '-'],
     ]
     const rowH = 28
     const startY = by + 60
@@ -627,19 +637,136 @@ export function createRenderer(): Renderer {
     }
   }
 
+  function drawDailyOverlay(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    dailyData: DailyData,
+    dailyResult: DailyResult | null,
+  ): void {
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'
+    ctx.fillRect(0, 0, width, height)
+    const boxW = Math.min(320, width - 40)
+    const boxH = dailyResult !== null ? 320 : 280
+    const bx = Math.round((width - boxW) / 2)
+    const by = Math.round((height - boxH) / 2)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(bx, by, boxW, boxH)
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'
+    ctx.fillRect(bx, by, boxW, 2)
+    ctx.fillRect(bx, by, 2, boxH)
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.fillRect(bx, by + boxH - 2, boxW, 2)
+    ctx.fillRect(bx + boxW - 2, by, 2, boxH)
+    const cx = Math.round(bx + boxW / 2)
+    ctx.fillStyle = '#edc22e'
+    ctx.font = 'bold 20px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('DAILY CHALLENGE', cx, by + 30)
+    const padX = 20
+    const rowH = 28
+    let startY = by + 64
+    if (dailyResult !== null) {
+      ctx.fillStyle = '#40ff60'
+      ctx.font = 'bold 16px "Courier New", monospace'
+      ctx.fillText('COMPLETED!', cx, startY)
+      startY += 32
+      const resultRows: [string, string][] = [
+        ['Your Score', String(dailyResult.score)],
+        ['Highest Tile', String(dailyResult.highestTile)],
+        ['Best Daily', String(dailyData.bestDailyScore)],
+      ]
+      for (let i = 0; i < resultRows.length; i++) {
+        const entry = resultRows[i]
+        if (!entry) continue
+        const [label, value] = entry
+        const ry = startY + i * rowH
+        if (i % 2 === 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.04)'
+          ctx.fillRect(bx + 4, ry - 10, boxW - 8, rowH)
+        }
+        ctx.fillStyle = '#bbada0'
+        ctx.font = '13px "Courier New", monospace'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, bx + padX, ry + 4)
+        ctx.fillStyle = '#f9f6f2'
+        ctx.font = 'bold 14px "Courier New", monospace'
+        ctx.textAlign = 'right'
+        ctx.fillText(value, bx + boxW - padX, ry + 4)
+      }
+      startY += resultRows.length * rowH + 8
+    }
+    const streakRows: [string, string][] = [
+      ['Current Streak', String(dailyData.currentStreak) + ' day' + (dailyData.currentStreak !== 1 ? 's' : '')],
+      ['Best Streak', String(dailyData.bestStreak) + ' day' + (dailyData.bestStreak !== 1 ? 's' : '')],
+    ]
+    for (let i = 0; i < streakRows.length; i++) {
+      const entry = streakRows[i]
+      if (!entry) continue
+      const [label, value] = entry
+      const ry = startY + i * rowH
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)'
+        ctx.fillRect(bx + 4, ry - 10, boxW - 8, rowH)
+      }
+      ctx.fillStyle = '#bbada0'
+      ctx.font = '13px "Courier New", monospace'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, bx + padX, ry + 4)
+      ctx.fillStyle = '#f9f6f2'
+      ctx.font = 'bold 14px "Courier New", monospace'
+      ctx.textAlign = 'right'
+      ctx.fillText(value, bx + boxW - padX, ry + 4)
+    }
+    const btnY = by + boxH - 52
+    const btnW = Math.round(boxW * 0.4)
+    const btnH = 34
+    if (dailyResult === null) {
+      const playBtnX = cx - Math.round(btnW / 2)
+      drawPixelButton(ctx, playBtnX, btnY, btnW, btnH, 'PLAY', 12, '#2a5a3a')
+      hitAreas.push({ x: playBtnX, y: btnY, w: btnW, h: btnH, action: 'daily-play' })
+    } else {
+      const closeBtnX = cx - Math.round(btnW / 2)
+      drawPixelButton(ctx, closeBtnX, btnY, btnW, btnH, 'CLOSE', 12)
+      hitAreas.push({ x: closeBtnX, y: btnY, w: btnW, h: btnH, action: 'close-daily' })
+    }
+  }
+
+  function drawDailyBanner(
+    ctx: CanvasRenderingContext2D,
+    gridX: number,
+    gridY: number,
+    gridSize: number,
+  ): void {
+    const bannerH = 24
+    const bannerW = Math.round(gridSize * 0.4)
+    const bx = gridX + Math.round((gridSize - bannerW) / 2)
+    const by = gridY + 4
+    ctx.fillStyle = 'rgba(90,74,16,0.85)'
+    ctx.fillRect(bx, by, bannerW, bannerH)
+    ctx.fillStyle = '#FFD700'
+    ctx.font = 'bold 12px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('DAILY CHALLENGE', bx + Math.round(bannerW / 2), by + Math.round(bannerH / 2))
+  }
+
   function render(
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
     opts: RenderOptions,
   ): void {
-    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying, isMuted, showStats, stats } =
+    const { score, bestScore, isOver, isWon, undoAvailable, continueWithAdAvailable, isAdPlaying, isMuted, showStats, stats, isDailyMode, showDailyOverlay, dailyData, dailyResult } =
       opts
     hitAreas = []
     ctx.imageSmoothingEnabled = false
     ctx.fillStyle = BG_COLOR
     ctx.fillRect(0, 0, width, height)
-    drawHeader(ctx, width, score, bestScore, isMuted)
+    drawHeader(ctx, width, score, bestScore, isMuted, isDailyMode)
     const { gridX, gridY, gridSize, gap, tileSize } = getGridLayout(width, height)
     ctx.fillStyle = GRID_BG_COLOR
     ctx.fillRect(gridX, gridY, gridSize, gridSize)
@@ -667,17 +794,23 @@ export function createRenderer(): Renderer {
     }
     renderScoreDeltas(ctx, gridX, gridY, gap, tileSize)
     renderCombo(ctx, gridX, gridY, gridSize)
+    if (isDailyMode) {
+      drawDailyBanner(ctx, gridX, gridY, gridSize)
+    }
     if (undoAvailable && !isOver && !isWon) {
       drawUndoButton(ctx, gridX, gridY, gridSize)
     }
     if (isOver || isWon) {
-      drawOverlay(ctx, gridX, gridY, gridSize, score, isOver, continueWithAdAvailable)
+      drawOverlay(ctx, gridX, gridY, gridSize, score, isOver, isDailyMode ? false : continueWithAdAvailable)
     }
     if (isAdPlaying) {
       drawAdOverlay(ctx, width, height)
     }
     if (showStats) {
       drawStatsOverlay(ctx, width, height, stats)
+    }
+    if (showDailyOverlay && dailyData !== null) {
+      drawDailyOverlay(ctx, width, height, dailyData, dailyResult)
     }
   }
 

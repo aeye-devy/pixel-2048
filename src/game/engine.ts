@@ -1,5 +1,6 @@
 export type Grid = number[][]
 export type Direction = 'left' | 'right' | 'up' | 'down'
+export type RngFn = () => number
 
 export interface GameState {
   grid: Grid
@@ -11,6 +12,25 @@ export interface GameState {
 const GRID_SIZE = 4
 const WIN_VALUE = 2048
 const SPAWN_FOUR_CHANCE = 0.1
+
+// Mulberry32 seeded PRNG — deterministic, fast, good distribution
+export function mulberry32(seed: number): RngFn {
+  let s = seed | 0
+  return () => {
+    s = (s + 0x6d2b79f5) | 0
+    let t = Math.imul(s ^ (s >>> 15), 1 | s)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+export function dateToSeed(dateStr: string): number {
+  let hash = 0
+  for (let i = 0; i < dateStr.length; i++) {
+    hash = ((hash << 5) - hash + dateStr.charCodeAt(i)) | 0
+  }
+  return hash
+}
 
 export function createGrid(): Grid {
   return Array.from({ length: GRID_SIZE }, (): number[] =>
@@ -28,14 +48,14 @@ function emptyPositions(grid: Grid): [number, number][] {
   return positions
 }
 
-export function spawnTile(grid: Grid): Grid {
+export function spawnTile(grid: Grid, rng: RngFn = Math.random): Grid {
   const positions = emptyPositions(grid)
   if (positions.length === 0) return grid
-  const idx = Math.floor(Math.random() * positions.length)
+  const idx = Math.floor(rng() * positions.length)
   const pos = positions[idx]
   if (!pos) return grid
   const [r, c] = pos
-  const value = Math.random() < SPAWN_FOUR_CHANCE ? 4 : 2
+  const value = rng() < SPAWN_FOUR_CHANCE ? 4 : 2
   const next = grid.map((row) => [...row])
   const row = next[r]
   if (row) row[c] = value
@@ -109,7 +129,7 @@ export function isGameOver(grid: Grid): boolean {
   return true
 }
 
-export function move(state: GameState, direction: Direction): GameState {
+export function move(state: GameState, direction: Direction, rng?: RngFn): GameState {
   if (state.over) return state
   let workGrid = state.grid.map((row) => [...row])
   let delta = 0
@@ -133,13 +153,13 @@ export function move(state: GameState, direction: Direction): GameState {
   if (gridEqual(workGrid, state.grid)) return state
   const newScore = state.score + delta
   const won = state.won || hasWon(workGrid)
-  const spawned = spawnTile(workGrid)
+  const spawned = spawnTile(workGrid, rng)
   const over = isGameOver(spawned)
   return { grid: spawned, score: newScore, won, over }
 }
 
-export function createInitialState(): GameState {
-  const grid = spawnTile(spawnTile(createGrid()))
+export function createInitialState(rng?: RngFn): GameState {
+  const grid = spawnTile(spawnTile(createGrid(), rng), rng)
   return { grid, score: 0, won: false, over: false }
 }
 
@@ -147,7 +167,7 @@ export function createInitialState(): GameState {
 // Used as the reward for watching an ad after game over.
 export function continueAfterGameOver(state: GameState): GameState {
   if (!state.over) return state
-  let grid = state.grid.map((row) => [...row])
+  const grid = state.grid.map((row) => [...row])
   const occupied: [number, number][] = []
   for (let r = 0; r < GRID_SIZE; r++) {
     for (let c = 0; c < GRID_SIZE; c++) {
@@ -293,10 +313,10 @@ export function countMerges(motions: TileMotion[]): number {
   return motions.filter((m) => m.absorbed).length
 }
 
-export function moveDetailed(state: GameState, direction: Direction): MoveDetail {
+export function moveDetailed(state: GameState, direction: Direction, rng?: RngFn): MoveDetail {
   if (state.over) return { state, motions: [], spawnedAt: null }
   const motions = computeMotions(state.grid, direction)
-  const newState = move(state, direction)
+  const newState = move(state, direction, rng)
   if (newState === state) return { state: newState, motions: [], spawnedAt: null }
   const postSlide = buildPostSlideGrid(state.grid, motions)
   const spawnedAt = findSpawnedPos(postSlide, newState.grid)
